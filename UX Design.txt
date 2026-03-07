@@ -1,0 +1,659 @@
+<!-- DataLens AI: My Data Management (Web) -->
+<!DOCTYPE html>
+
+<html lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DataLens AI - My Data Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#135bec",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#101622",
+                    },
+                    fontFamily: {
+                        "display": ["Inter"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100">
+<div class="relative flex h-screen w-full overflow-hidden">
+<!-- Sidebar Navigation -->
+<aside class="hidden md:flex w-64 flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+<div class="p-6 flex items-center gap-3">
+<div class="size-8 bg-primary rounded-lg flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-xl">analytics</span>
+</div>
+<h1 class="text-xl font-bold tracking-tight text-primary">DataLens AI</h1>
+</div>
+<nav class="flex-1 px-4 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-medium">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 bg-primary/10 text-primary rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined font-fill">database</span>
+<span class="font-medium">Mis Datos</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined">insights</span>
+<span class="font-medium">Análisis</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-medium">Ajustes</span>
+</a>
+</nav>
+<div class="p-4 border-t border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-3 px-3 py-2">
+<div class="size-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center overflow-hidden">
+<img alt="User Profile" class="size-full object-cover" data-alt="User profile avatar placeholder" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAo0MPIWgcWBKzUZIAzFqeDeEVZhLbmxZAzXZdb0AXMME8CtaRfE2cHx4vhb80JS-OjRyiiuNYd3bGKxnA-HOmP1uU6762C0Y4e5T5D6k_ZBx6rwAelOSkPrl9ur56-MMO7TiaHxvQP9-h0tYSX6PG8R8Gp6Sq1MptgXS3hv_gTx6Ow6KcZwr3_4v5o62q5Jtc-yEhJg6OkouLWwspXvMKoc2NxPeu3Iwq-3hKimeGSZI3G8DCOwNPYbVsIWUJ5V7T0XwAkL98bIVc"/>
+</div>
+<div class="flex flex-col">
+<span class="text-sm font-semibold">SME Manager</span>
+<span class="text-xs text-slate-500">Plan Pro</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-w-0 overflow-y-auto">
+<!-- Header (Mobile Optimized) -->
+<header class="flex items-center justify-between p-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-10 md:hidden">
+<span class="material-symbols-outlined text-slate-600 dark:text-slate-400">menu</span>
+<h2 class="text-lg font-bold">Mis Datos</h2>
+<span class="material-symbols-outlined text-slate-600 dark:text-slate-400">account_circle</span>
+</header>
+<div class="p-6 md:p-8 space-y-8 max-w-7xl mx-auto w-full">
+<!-- Top Section: Upload Area -->
+<section>
+<div class="mb-4">
+<h2 class="text-2xl font-bold tracking-tight">Gestión de Datos</h2>
+<p class="text-slate-500 text-sm">Sube y gestiona tus archivos de ventas o inventario para análisis de IA.</p>
+</div>
+<div class="group relative flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 hover:bg-primary/10 transition-all p-12 text-center cursor-pointer">
+<div class="size-16 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-2">
+<span class="material-symbols-outlined text-3xl">cloud_upload</span>
+</div>
+<div>
+<p class="text-lg font-bold text-slate-900 dark:text-slate-100">Arrastra y suelta tus archivos aquí</p>
+<p class="text-sm text-slate-500">Formatos soportados: Excel (.xlsx), CSV. Tamaño máximo 50MB.</p>
+</div>
+<button class="mt-2 flex items-center gap-2 px-6 py-2.5 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-all shadow-md">
+<span class="material-symbols-outlined text-sm">add</span>
+                            Explorar Archivos
+                        </button>
+</div>
+</section>
+<!-- Middle Section: Data Table -->
+<section class="space-y-4">
+<div class="flex items-center justify-between">
+<h3 class="text-xl font-bold">Archivos Recientes</h3>
+<div class="flex gap-2">
+<button class="p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800">
+<span class="material-symbols-outlined text-lg">filter_list</span>
+</button>
+<button class="p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800">
+<span class="material-symbols-outlined text-lg">search</span>
+</button>
+</div>
+</div>
+<div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase text-[11px] font-bold tracking-wider">
+<th class="px-6 py-4">Nombre del Archivo</th>
+<th class="px-6 py-4">Fecha de Carga</th>
+<th class="px-6 py-4">Estado</th>
+<th class="px-6 py-4 text-right">Acciones</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-green-600">table_chart</span>
+<span class="font-medium">Ventas_Q3_2023.csv</span>
+</div>
+</td>
+<td class="px-6 py-4 text-slate-500">hace 2 horas</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+<span class="size-1.5 rounded-full bg-green-500"></span>
+                                                Procesado
+                                            </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-blue-600">description</span>
+<span class="font-medium">Inventario_Local_A.xlsx</span>
+</div>
+</td>
+<td class="px-6 py-4 text-slate-500">Ayer, 14:20</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+<span class="size-1.5 rounded-full bg-amber-500"></span>
+                                                Pendiente
+                                            </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-green-600">table_chart</span>
+<span class="font-medium">Reporte_Gastos_Final.csv</span>
+</div>
+</td>
+<td class="px-6 py-4 text-slate-500">01 Oct 2023</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+<span class="size-1.5 rounded-full bg-green-500"></span>
+                                                Procesado
+                                            </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<!-- Bottom Section: Data Preview Grid -->
+<section class="space-y-4">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<h3 class="text-xl font-bold">Vista Previa de Datos</h3>
+<span class="text-xs font-medium text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">Ventas_Q3_2023.csv</span>
+</div>
+<button class="text-primary text-sm font-semibold hover:underline">Ver pantalla completa</button>
+</div>
+<div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+<div class="overflow-x-auto">
+<div class="grid grid-cols-6 min-w-[800px] border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+<div class="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase border-r border-slate-100 dark:border-slate-800">ID</div>
+<div class="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase border-r border-slate-100 dark:border-slate-800">Fecha</div>
+<div class="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase border-r border-slate-100 dark:border-slate-800">Producto</div>
+<div class="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase border-r border-slate-100 dark:border-slate-800">Cantidad</div>
+<div class="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase border-r border-slate-100 dark:border-slate-800">Precio</div>
+<div class="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase">Total</div>
+</div>
+<!-- Spreadsheet rows -->
+<div class="divide-y divide-slate-100 dark:divide-slate-800">
+<div class="grid grid-cols-6 min-w-[800px] text-xs">
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-mono text-slate-400 bg-slate-50/50 dark:bg-slate-800/20">1001</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800">2023-07-01</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-medium">Laptop Pro 14"</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">5</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">$1,200.00</div>
+<div class="px-4 py-2 text-right font-semibold text-primary">$6,000.00</div>
+</div>
+<div class="grid grid-cols-6 min-w-[800px] text-xs">
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-mono text-slate-400 bg-slate-50/50 dark:bg-slate-800/20">1002</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800">2023-07-02</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-medium">Monitor 4K 27"</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">12</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">$450.00</div>
+<div class="px-4 py-2 text-right font-semibold text-primary">$5,400.00</div>
+</div>
+<div class="grid grid-cols-6 min-w-[800px] text-xs">
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-mono text-slate-400 bg-slate-50/50 dark:bg-slate-800/20">1003</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800">2023-07-03</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-medium">Teclado Mecánico</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">24</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">$85.00</div>
+<div class="px-4 py-2 text-right font-semibold text-primary">$2,040.00</div>
+</div>
+<div class="grid grid-cols-6 min-w-[800px] text-xs">
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-mono text-slate-400 bg-slate-50/50 dark:bg-slate-800/20">1004</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800">2023-07-04</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 font-medium">Mouse Inalámbrico</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">50</div>
+<div class="px-4 py-2 border-r border-slate-100 dark:border-slate-800 text-right">$45.00</div>
+<div class="px-4 py-2 text-right font-semibold text-primary">$2,250.00</div>
+</div>
+</div>
+</div>
+<div class="bg-slate-50 dark:bg-slate-800/30 p-3 flex justify-center">
+<span class="text-xs text-slate-500 italic">Mostrando las primeras 50 filas de 1,240</span>
+</div>
+</div>
+</section>
+</div>
+</main>
+<!-- Bottom Navigation for Mobile -->
+<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-around px-2 py-3 z-20">
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-[10px] font-medium">Panel</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-primary" href="#">
+<span class="material-symbols-outlined font-fill">database</span>
+<span class="text-[10px] font-medium">Mis Datos</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">bolt</span>
+<span class="text-[10px] font-medium">IA Insights</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-[10px] font-medium">Ajustes</span>
+</a>
+</nav>
+</div>
+</body></html>
+
+<!-- DataLens AI: AI Data Interaction (Web) -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DataLens AI - Analysis</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#135bec",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#101622",
+                    },
+                    fontFamily: {
+                        "display": ["Inter"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display">
+<div class="relative flex h-screen w-full flex-col overflow-hidden">
+<!-- Header -->
+<header class="flex items-center bg-white dark:bg-background-dark/50 border-b border-slate-200 dark:border-primary/20 p-4 justify-between sticky top-0 z-10 backdrop-blur-md">
+<div class="flex items-center gap-3">
+<div class="text-primary flex size-10 items-center justify-center bg-primary/10 rounded-lg">
+<span class="material-symbols-outlined">analytics</span>
+</div>
+<h2 class="text-slate-900 dark:text-slate-100 text-lg font-bold leading-tight tracking-tight">DataLens AI</h2>
+</div>
+<div class="flex items-center gap-2">
+<button class="flex size-10 items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-primary/10 transition-colors">
+<span class="material-symbols-outlined text-slate-600 dark:text-slate-400">notifications</span>
+</button>
+<button class="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary border border-primary/20">
+<span class="material-symbols-outlined">person</span>
+</button>
+</div>
+</header>
+<!-- Navigation Tabs -->
+<div class="bg-white dark:bg-background-dark border-b border-slate-200 dark:border-primary/10">
+<div class="flex px-4 gap-6 overflow-x-auto hide-scrollbar">
+<a class="flex flex-col items-center justify-center border-b-2 border-primary text-primary pb-3 pt-4 whitespace-nowrap" href="#">
+<span class="text-sm font-bold">AI Understanding</span>
+</a>
+<a class="flex flex-col items-center justify-center border-b-2 border-transparent text-slate-500 dark:text-slate-400 pb-3 pt-4 whitespace-nowrap" href="#">
+<span class="text-sm font-bold">Chat Analysis</span>
+</a>
+<a class="flex flex-col items-center justify-center border-b-2 border-transparent text-slate-500 dark:text-slate-400 pb-3 pt-4 whitespace-nowrap" href="#">
+<span class="text-sm font-bold">Raw Data</span>
+</a>
+</div>
+</div>
+<!-- Main Content Area (Scrollable) -->
+<main class="flex-1 overflow-y-auto p-4 space-y-6 pb-24">
+<!-- Dashboard Section -->
+<section class="space-y-4">
+<div class="flex items-center justify-between">
+<h3 class="text-slate-900 dark:text-slate-100 text-xl font-bold">Data Validation</h3>
+<span class="text-xs font-semibold px-2 py-1 bg-primary/10 text-primary rounded-full uppercase">Live Sync</span>
+</div>
+<div class="grid grid-cols-1 gap-4">
+<!-- Confidence Score Card -->
+<div class="flex flex-col items-center justify-center gap-4 rounded-xl p-6 bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-primary/20 shadow-sm">
+<div class="relative flex items-center justify-center">
+<!-- Circular Progress Simulation -->
+<svg class="w-32 h-32 transform -rotate-90">
+<circle class="text-slate-100 dark:text-slate-800" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-width="8"></circle>
+<circle class="text-primary" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-dasharray="364.4" stroke-dashoffset="80" stroke-width="8"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<span class="text-3xl font-bold text-slate-900 dark:text-slate-100">78%</span>
+<span class="text-[10px] uppercase font-bold text-slate-500">Confidence</span>
+</div>
+</div>
+<div class="text-center">
+<p class="text-slate-900 dark:text-slate-100 text-sm font-medium">Model performance is optimal</p>
+<p class="text-green-500 text-xs font-bold flex items-center justify-center gap-1">
+<span class="material-symbols-outlined text-sm">trending_up</span> +5% from yesterday
+                            </p>
+</div>
+</div>
+<!-- Relationship Map Preview -->
+<div class="flex flex-col gap-3 rounded-xl p-4 bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-primary/20">
+<div class="flex justify-between items-center">
+<p class="text-slate-900 dark:text-slate-100 font-bold text-sm">Schema Mapping</p>
+<span class="material-symbols-outlined text-slate-400 text-sm">fullscreen</span>
+</div>
+<div class="h-32 w-full rounded-lg bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center relative overflow-hidden">
+<!-- Abstract Map Representation -->
+<div class="absolute inset-0 opacity-20 dark:opacity-40">
+<div class="absolute top-4 left-4 w-12 h-16 border-2 border-primary rounded-md"></div>
+<div class="absolute top-10 right-10 w-16 h-12 border-2 border-green-500 rounded-md"></div>
+<div class="absolute bottom-4 left-20 w-14 h-10 border-2 border-primary rounded-md"></div>
+<svg class="absolute inset-0 w-full h-full text-slate-300 dark:text-slate-600" fill="none" stroke="currentColor">
+<path d="M40 40 L160 80 M160 80 L100 110" stroke-width="2"></path>
+</svg>
+</div>
+<span class="text-xs font-medium text-slate-500 dark:text-slate-400 z-10">4 Entities Detected</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Chat Interface Section -->
+<section class="space-y-4">
+<h3 class="text-slate-900 dark:text-slate-100 text-xl font-bold">AI Assistant</h3>
+<div class="flex flex-col gap-4">
+<!-- AI Message -->
+<div class="flex gap-3 max-w-[85%]">
+<div class="size-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-white text-sm">smart_toy</span>
+</div>
+<div class="bg-white dark:bg-primary/10 p-4 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-slate-200 dark:border-primary/20 shadow-sm">
+<p class="text-sm text-slate-800 dark:text-slate-200 leading-relaxed">
+                                I've noticed a discrepancy in the <span class="font-bold text-primary">Revenue</span> column. Some entries use "USD" while others are unspecified. Should I normalize all to USD?
+                            </p>
+</div>
+</div>
+<!-- Quick Replies -->
+<div class="flex flex-wrap gap-2 pt-2">
+<button class="px-4 py-2 bg-primary text-white text-xs font-bold rounded-full shadow-md shadow-primary/20">Yes, normalize all</button>
+<button class="px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold rounded-full">Only for 2024</button>
+<button class="px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold rounded-full">Skip column</button>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Chat Input/Nav -->
+<div class="fixed bottom-0 left-0 right-0 bg-white dark:bg-background-dark border-t border-slate-200 dark:border-primary/20 px-4 pb-8 pt-4 z-20">
+<div class="flex items-center gap-2 mb-4">
+<div class="flex-1 bg-slate-100 dark:bg-slate-800 rounded-full px-4 py-3 flex items-center gap-2 border border-transparent focus-within:border-primary transition-all">
+<span class="material-symbols-outlined text-slate-400 text-lg">attachment</span>
+<input class="bg-transparent border-none focus:ring-0 text-sm w-full text-slate-900 dark:text-slate-100 placeholder:text-slate-500" placeholder="Ask AI about data..." type="text"/>
+<button class="text-primary font-bold text-sm">Send</button>
+</div>
+</div>
+<!-- Tab Bar -->
+<nav class="flex justify-between items-center px-4">
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-[10px] font-medium">Dashboard</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-primary" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+<span class="text-[10px] font-medium">Analysis</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">database</span>
+<span class="text-[10px] font-medium">Data</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-[10px] font-medium">Settings</span>
+</a>
+</nav>
+</div>
+</div>
+</body></html>
+
+<!-- DataLens AI: Reports Dashboard (Web) -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DataLens AI - Reports Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#135bec",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#101622",
+                        "surface-dark": "#192233",
+                        "border-dark": "#232f48"
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .chart-gradient-blue {
+            background: linear-gradient(180deg, rgba(19, 91, 236, 0.2) 0%, rgba(19, 91, 236, 0) 100%);
+        }
+        .chart-gradient-green {
+            background: linear-gradient(180deg, rgba(11, 218, 94, 0.2) 0%, rgba(11, 218, 94, 0) 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 min-h-screen flex flex-col">
+<header class="sticky top-0 z-10 flex items-center bg-background-light dark:bg-background-dark border-b border-slate-200 dark:border-border-dark p-4 justify-between">
+<div class="flex items-center gap-3">
+<div class="bg-primary rounded-lg p-1.5 flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-2xl">insights</span>
+</div>
+<h1 class="text-slate-900 dark:text-slate-100 text-lg font-bold tracking-tight">DataLens AI</h1>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-dark rounded-full">
+<span class="material-symbols-outlined">search</span>
+</button>
+<button class="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-dark rounded-full">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+</div>
+</header>
+<main class="flex-1 overflow-y-auto pb-24">
+<div class="p-4 flex flex-col gap-6">
+<div class="flex flex-col gap-1">
+<h2 class="text-2xl font-bold text-slate-900 dark:text-slate-100">Business Reports</h2>
+<p class="text-sm text-slate-500 dark:text-slate-400">AI-powered insights for your SME</p>
+</div>
+<div class="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+<button class="whitespace-nowrap px-4 py-2 rounded-full bg-primary text-white text-sm font-semibold">All Reports</button>
+<button class="whitespace-nowrap px-4 py-2 rounded-full bg-slate-100 dark:bg-surface-dark text-slate-600 dark:text-slate-300 text-sm font-semibold">Financial</button>
+<button class="whitespace-nowrap px-4 py-2 rounded-full bg-slate-100 dark:bg-surface-dark text-slate-600 dark:text-slate-300 text-sm font-semibold">Operations</button>
+<button class="whitespace-nowrap px-4 py-2 rounded-full bg-slate-100 dark:bg-surface-dark text-slate-600 dark:text-slate-300 text-sm font-semibold">Sales</button>
+</div>
+<div class="grid grid-cols-1 gap-4">
+<div class="bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark rounded-xl p-5 shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<div>
+<h3 class="font-bold text-slate-900 dark:text-slate-100">Profitability Analysis</h3>
+<p class="text-xs text-slate-500 dark:text-slate-400">Updated 2h ago</p>
+</div>
+<button class="p-1 text-slate-400">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+<div class="flex items-end gap-3 mb-4">
+<span class="text-3xl font-bold text-slate-900 dark:text-slate-100">$42.5k</span>
+<span class="text-sm font-medium text-emerald-500 flex items-center mb-1">
+<span class="material-symbols-outlined text-sm">trending_up</span>
+                            12.4%
+                        </span>
+</div>
+<div class="h-16 w-full rounded-lg chart-gradient-green relative overflow-hidden mb-4">
+<svg class="absolute bottom-0 left-0 w-full h-full" preserveaspectratio="none" viewbox="0 0 100 40">
+<path d="M0 40 L0 30 Q 25 20, 50 25 T 100 5 L 100 40 Z" fill="none" stroke="#10b981" stroke-width="2"></path>
+</svg>
+</div>
+<div class="flex gap-2">
+<button class="flex-1 bg-primary text-white py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm">download</span>
+                            Export
+                        </button>
+<button class="px-3 bg-slate-100 dark:bg-background-dark text-slate-600 dark:text-slate-300 py-2 rounded-lg text-sm font-semibold">
+                            Details
+                        </button>
+</div>
+</div>
+<div class="bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark rounded-xl p-5 shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<div>
+<h3 class="font-bold text-slate-900 dark:text-slate-100">Cash Flow Trends</h3>
+<p class="text-xs text-slate-500 dark:text-slate-400">Monthly overview</p>
+</div>
+<button class="p-1 text-slate-400">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+<div class="flex items-end gap-3 mb-4">
+<span class="text-3xl font-bold text-slate-900 dark:text-slate-100">$12.8k</span>
+<span class="text-sm font-medium text-rose-500 flex items-center mb-1">
+<span class="material-symbols-outlined text-sm">trending_down</span>
+                            3.2%
+                        </span>
+</div>
+<div class="h-16 w-full rounded-lg chart-gradient-blue relative overflow-hidden mb-4">
+<svg class="absolute bottom-0 left-0 w-full h-full" preserveaspectratio="none" viewbox="0 0 100 40">
+<path d="M0 40 L0 10 Q 30 35, 60 15 T 100 25 L 100 40 Z" fill="none" stroke="#135bec" stroke-width="2"></path>
+</svg>
+</div>
+<div class="flex gap-2">
+<button class="flex-1 bg-primary text-white py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm">download</span>
+                            Export
+                        </button>
+<button class="px-3 bg-slate-100 dark:bg-background-dark text-slate-600 dark:text-slate-300 py-2 rounded-lg text-sm font-semibold">
+                            Details
+                        </button>
+</div>
+</div>
+<div class="bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark rounded-xl p-5 shadow-sm border-dashed flex flex-col items-center justify-center py-10 gap-3">
+<div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary">add</span>
+</div>
+<div class="text-center">
+<h3 class="font-bold text-slate-900 dark:text-slate-100">New Report</h3>
+<p class="text-sm text-slate-500 dark:text-slate-400">Create a custom AI report</p>
+</div>
+<button class="mt-2 px-6 py-2 bg-primary text-white rounded-lg text-sm font-semibold">Generate Now</button>
+</div>
+</div>
+<div class="bg-primary/5 dark:bg-primary/10 rounded-xl p-5 border border-primary/20">
+<div class="flex gap-4 items-start">
+<div class="bg-primary rounded-lg p-2 shrink-0">
+<span class="material-symbols-outlined text-white">auto_awesome</span>
+</div>
+<div>
+<h4 class="font-bold text-slate-900 dark:text-slate-100">AI Insight of the Day</h4>
+<p class="text-sm text-slate-600 dark:text-slate-300 mt-1">Based on your recent trends, optimizing your inventory turnover could increase liquid cash by 15% next quarter.</p>
+<button class="text-primary text-xs font-bold mt-3 flex items-center gap-1">
+                            LEARN MORE <span class="material-symbols-outlined text-xs">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<nav class="fixed bottom-0 w-full bg-white dark:bg-surface-dark border-t border-slate-200 dark:border-border-dark flex items-center justify-around px-2 py-3 z-20">
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-[10px] font-medium">Home</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-primary" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">description</span>
+<span class="text-[10px] font-medium">Reports</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<div class="bg-primary text-white w-10 h-10 -mt-8 rounded-full shadow-lg flex items-center justify-center border-4 border-background-light dark:border-background-dark">
+<span class="material-symbols-outlined">add</span>
+</div>
+<span class="text-[10px] font-medium">Create</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="text-[10px] font-medium">Analytics</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-400" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-[10px] font-medium">Settings</span>
+</a>
+</nav>
+</body></html>

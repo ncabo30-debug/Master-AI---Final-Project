@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py --version)",
+      "Bash(where python3)",
+      "Bash(where py)",
+      "Bash(py scripts/office/unpack.py \"C:\\\\Users\\\\Keyrus\\\\Downloads\\\\DataLens_AI_Anatomia_Agentes \\(1\\).docx\" unpacked_template/)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(node -e \"require\\(''docx''\\); console.log\\(''ok''\\)\")",
+      "Bash(npm install -g docx)"
+    ]
+  }
+}

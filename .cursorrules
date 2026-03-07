@@ -1,0 +1,7 @@
+# Project DataLens Rules
+
+## 1. End of Session Cleanup
+Al terminar cada sesión de trabajo, MDE SIEMPRE DEBE preguntarle proactivamente al usuario:
+"¿Hay algún archivo de diseño, script conceptual o documento antiguo que deberíamos mover a la papelera de 'obsoleto' dentro de la carpeta brain?"
+MDE debe listar explícitamente cuáles archivos sospecha que pueden ser obsoletos.
+Si el usuario confirma, moverolos a `brain/obsoleto_YYYY-MM-DD/`.

@@ -1,0 +1,144 @@
+import pandas as pd
+import numpy as np
+import warnings
+warnings.filterwarnings('ignore')
+
+# 1. Crear dataframe sucio
+data = {
+    "id": [1, 2, 3, 4],
+    "nombre": ["Juan Perez", "Maria Gomez", "Carlos Ruiz", "Ana Diaz"],
+    "fecha_ingreso": ["12/01/2023", "2023-05-14", "NO_SABE", "11/11/2022"],
+    "salario": ["1000.50", "2,000", "1500", "3000.75"], 
+    "estado": ["Activo", "Inactivo", "Activo", "Activo"]
+}
+df_raw = pd.DataFrame(data)
+
+state = {
+    "df_raw": df_raw,
+    "file_path": "datos_crudos.csv",
+    "clean_file_path": "datos_limpios.xlsx", # AHORA ES EXCEL
+    "iteration": 1,
+    "errors": "",
+    "format_valid": False,
+    "data_integrity_valid": False,
+    "context": ""
+}
+
+print("="*60)
+print("📌 DATOS CRUDOS (INICIO - CSV Simulado):")
+print(state["df_raw"])
+print("="*60)
+
+# ==========================================
+# AGENTES SIMULADOS
+# ==========================================
+
+def agent_1_profiler(state):
+    print(f"\n[🤖 AGENTE 1] Analizando archivo y definiendo contexto...")
+    state["context"] = "id(int), nombre(str), fecha_ingreso(datetime), salario(float), estado(str)"
+    return state
+
+def agent_2_cleaner(state):
+    print(f"[🛠️ AGENTE 2] Ejecutando limpieza y dando FORMATO EXCEL (Iteración {state['iteration']})...")
+    df = state["df_raw"].copy()
+    
+    # Limpieza guiada por IA
+    if state["iteration"] == 1:
+        df['salario'] = df['salario'].replace({',': ''}, regex=True).astype(float)
+        df['fecha_ingreso'] = df['fecha_ingreso'] # Falla intencional en iteración 1
+    elif state["iteration"] == 2:
+        df['salario'] = df['salario'].replace({',': ''}, regex=True).astype(float)
+        df['fecha_ingreso'] = pd.to_datetime(df['fecha_ingreso'], errors='coerce')
+    
+    # GUARDAR COMO EXCEL (.xlsx)
+    df.to_excel(state["clean_file_path"], index=False)
+    
+    # APLICAR FORMATOS VISUALES Y METADATOS (Colores y formatos de celda)
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.styles import PatternFill, Font
+        
+        wb = load_workbook(state["clean_file_path"])
+        ws = wb.active
+        
+        # 1. Color de cabecera (Fondo Azul, Letra Blanca Negrita)
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True)
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            
+        # 2. Formato estricto de columnas
+        for row in range(2, ws.max_row + 1):
+            # Columna C (Fecha): Formato visual YYYY-MM-DD
+            ws[f'C{row}'].number_format = 'YYYY-MM-DD'
+            # Columna D (Salario): Formato moneda con $ y comas
+            ws[f'D{row}'].number_format = '"$"#,##0.00'
+            
+        wb.save(state["clean_file_path"])
+        print("   🎨 [Agente 2] Metadatos, colores y formatos inyectados al archivo Excel.")
+    except Exception as e:
+        print("   ⚠️ No se pudo aplicar el formato de color (Librería openpyxl no disponible).")
+        
+    return state
+
+def agent_3_validator(state):
+    print("[🔍 AGENTE 3] Leyendo el EXCEL desde el disco para validar que retuvo los formatos...")
+    # LEYENDO EL EXCEL DIRECTAMENTE DEL DISCO
+    df_check = pd.read_excel(state["clean_file_path"])
+    errors = []
+    
+    # Validar que los tipos sobrevivieron en el archivo físico
+    if not pd.api.types.is_datetime64_any_dtype(df_check['fecha_ingreso']):
+        errors.append("La columna 'fecha_ingreso' en el Excel guardado es texto. Faltó convertirla a fecha real.")
+        
+    if not pd.api.types.is_float_dtype(df_check['salario']):
+        errors.append("La columna 'salario' no se guardó como número en el Excel.")
+        
+    if errors:
+        state["format_valid"] = False
+        state["errors"] = " | ".join(errors)
+    else:
+        state["format_valid"] = True
+        state["errors"] = ""
+        print("   ✅ [Agente 3] El archivo Excel retuvo correctamente los metadatos de Fechas y Números.")
+    return state
+
+def agent_4_auditor(state):
+    print("[⚖️ AGENTE 4] Auditando integridad...")
+    df_check = pd.read_excel(state["clean_file_path"])
+    if len(state["df_raw"]) == len(df_check):
+        state["data_integrity_valid"] = True
+        print("   ✅ [Agente 4] No hay pérdida de datos.")
+    else:
+        state["data_integrity_valid"] = False
+        state["errors"] += " | Faltan filas."
+    return state
+
+# ==========================================
+# MOTOR DEL FLUJO
+# ==========================================
+
+state = agent_1_profiler(state)
+
+while True:
+    state = agent_2_cleaner(state)
+    state = agent_3_validator(state)
+    state = agent_4_auditor(state)
+    
+    if state["format_valid"] and state["data_integrity_valid"]:
+        print(f"\n[✅ SISTEMA] AUDITORÍA SUPERADA. Archivo .xlsx listo para el usuario.")
+        break
+    elif state["iteration"] >= 3:
+        print("\n[🛑 SISTEMA] MÁXIMO DE INTENTOS ALCANZADO.")
+        break
+    else:
+        print(f"\n[❌ SISTEMA] Error detectado: {state['errors']}")
+        print(f"    -> Reintentando...")
+        state["iteration"] += 1
+
+print("="*60)
+print("✨ TIPOS DE DATOS CONSERVADOS EN EL ARCHIVO .XLSX (Final):")
+df_final = pd.read_excel(state["clean_file_path"])
+print(df_final.dtypes)
+print("="*60)

@@ -1,0 +1,65 @@
+# Walkthrough — Pipeline Completo: Limpieza → Análisis → Visualización
+
+Implementación de las 3 fases del pipeline basado en [part 1](file:///C:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/brain/ai_studio_code.txt) y [part 2](file:///C:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/brain/ai_studio_code%20-%20part%202.py).
+
+## Arquitectura Final
+
+```mermaid
+graph TD
+    A[CSV Upload] --> B[ProfilerAgent]
+    B --> C[CleanerAgent]
+    C --> D[FormatValidator]
+    D --> E[IntegrityAuditor]
+    E -->|Fallo| C
+    E -->|OK| F["Excel .xlsx + Datos Limpios"]
+    F --> G[SchemaAgent]
+    G --> H[ComprehensionAgent]
+    H --> I["Usuario responde preguntas"]
+    I --> J["AnalystAgent (Phase 2)"]
+    J --> K{"¿Aprobado?"}
+    K -->|No| L["IntegrityAuditor verifica"]
+    L --> J
+    K -->|Sí| M["VizExpertAgent (Phase 3)"]
+    M --> N["3 Propuestas de Viz"]
+    N --> O["Usuario elige"]
+    O --> P[SpecialistAgent + Validator]
+    P --> Q["IntegrityAuditor Final Audit"]
+    Q --> R["Dashboard + Badge Auditoría"]
+```
+
+---
+
+## Archivos Creados (Fase 1 + 2 + 3)
+
+| Archivo | Rol |
+|---------|-----|
+| [ProfilerAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/lib/agents/ProfilerAgent.ts) | Infiere tipos, detecta datos sucios |
+| [CleanerAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/lib/agents/CleanerAgent.ts) | Limpia datos + genera Excel .xlsx |
+| [FormatValidatorAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/lib/agents/FormatValidatorAgent.ts) | Verifica tipos en Excel |
+| [IntegrityAuditorAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/lib/agents/IntegrityAuditorAgent.ts) | Verifica integridad + asiste análisis + auditoría final |
+| [AnalystAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/lib/agents/AnalystAgent.ts) | Análisis narrativo con feedback humano |
+| [VizExpertAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/lib/agents/VizExpertAgent.ts) | 3 propuestas de visualización |
+| [AnalysisPanel.tsx](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/components/AnalysisPanel.tsx) | UI aprobar/rechazar análisis |
+| [VizProposalPanel.tsx](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/antigravity%20test/datalens-app/src/components/VizProposalPanel.tsx) | UI 3 cards seleccionables |
+
+---
+
+## Flujo del Usuario (6 tabs)
+
+| Step | Tab | Descripción |
+|------|-----|-------------|
+| 1 | Mis Datos | Upload CSV |
+| 2 | Schema IA | Limpieza (4 agentes) + Schema + Preguntas |
+| 3 | Análisis | AnalystAgent genera análisis → Aprobar/Rechazar con feedback |
+| 4 | Visualización | VizExpert propone 3 combos → Usuario elige |
+| 5 | Dashboard | Dashboard final con badge "Auditoría Pasada ✅" |
+| 6 | Admin/Logs | Terminal + Flow Visualizer |
+
+---
+
+## Verificación
+
+| Check | Resultado |
+|-------|-----------|
+| `npx tsc --noEmit` | ✅ 0 errores |
+| `npm run build` | ✅ 3.1s, 6 páginas |
