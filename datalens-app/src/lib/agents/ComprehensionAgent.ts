@@ -1,4 +1,4 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -12,9 +12,9 @@ export class ComprehensionAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'GENERATE_QUESTIONS') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as { schema: SchemaMap });
             this.communicate(message.from, 'QUESTIONS_GENERATED', result);
         }
     }
@@ -45,7 +45,7 @@ IMPORTANTE: RESPONDE ÚNICA Y EXCLUSIVAMENTE CON EL OBJETO JSON PURO. NO uses bl
 
             const jsonContent = await LLMService.call(prompt, this.id, 'pro');
 
-            let parsed;
+            let parsed: { question?: string; options?: string[] };
             try {
                 // Remove markdown blocks if present
                 const match = jsonContent.match(/\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`/);
@@ -59,17 +59,18 @@ IMPORTANTE: RESPONDE ÚNICA Y EXCLUSIVAMENTE CON EL OBJETO JSON PURO. NO uses bl
                 }
 
                 parsed = JSON.parse(cleanContent);
-            } catch (e) {
+            } catch {
                 console.error(`[ComprehensionAgent] Failed to parse:`, jsonContent);
                 parsed = { question: "No pude entender a la IA. Elige una opción técnica:", options: categoryCols };
             }
 
             AgentLogger.logExecution(this.id, Date.now() - start);
-            return { questions: [{ id: 'q1', text: parsed.question, options: parsed.options || categoryCols }] };
+            return { questions: [{ id: 'q1', text: parsed.question || 'Elegí una dimensión para agrupar el gráfico principal.', options: parsed.options || categoryCols }] };
 
-        } catch (error: any) {
-            AgentLogger.error(this.id, `Fetch Error: ${error.message}`);
-            return { questions: [{ id: 'q1', text: `Error en IA local (${error.message}). Selecciona un campo manualmente:`, options: categoryCols }] };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            AgentLogger.error(this.id, `Fetch Error: ${message}`);
+            return { questions: [{ id: 'q1', text: `Error en IA local (${message}). Selecciona un campo manualmente:`, options: categoryCols }] };
         }
     }
 }

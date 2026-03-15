@@ -19,8 +19,9 @@ import { DuplicateDetectorAgent } from './DuplicateDetectorAgent';
 import { OutlierDetectorAgent } from './OutlierDetectorAgent';
 import { LLM_TIMEOUT_MS } from './core/LLMService';
 import type {
-    ProfileResult, CleanResult, VizProposalsResult, FinalAuditResult,
-    ReportConfig, FileInspectionResult, DuplicateReport, OutlierReport, ChatResult
+    ProfileResult, CleanResult, VizProposalsResult, ReportConfig,
+    FileInspectionResult, DuplicateReport, OutlierReport, ChatResult,
+    SchemaMap, QuestionOption, VizProposal, SpecialistCodeResult, ValidatorResult
 } from './types';
 
 /**
@@ -45,7 +46,7 @@ export class ManagerAgent extends AgentBase {
 
     protected handleMessage(): void { /* Manager is not message-driven */ }
 
-    public async execute(): Promise<any> {
+    public async execute(): Promise<never> {
         throw new Error('ManagerAgent uses targeted methods.');
     }
 
@@ -250,7 +251,7 @@ export class ManagerAgent extends AgentBase {
     public async processFullPipeline(
         summaries: Record<string, string>,
         profile: ProfileResult
-    ): Promise<{ analysis: string; proposals: any[] }> {
+    ): Promise<{ analysis: string; proposals: VizProposal[] }> {
         AgentLogger.logStep(this.id, '📝 Generando análisis narrativo...', this.sessionId);
         const analysisResult = await this.processAnalysis(summaries);
 
@@ -268,7 +269,7 @@ export class ManagerAgent extends AgentBase {
 
     public async generateFinalDashboard(
         data: Record<string, unknown>[],
-        schema: any,
+        schema: SchemaMap,
         answers: Record<string, string>
     ): Promise<{ report: ReportConfig; auditPassed: boolean; discrepancies: string[] }> {
         const reportResult = await this.generateFinalReport(data, schema, answers);
@@ -277,7 +278,16 @@ export class ManagerAgent extends AgentBase {
         const auditorA = new IntegrityAuditorAgent(`final-audit-${Date.now()}`, this.tenantId, sessionBus);
 
         try {
-            const auditResult = auditorA.auditFinalReport(data, reportResult.report.data || []);
+            const reportData = (reportResult.report.data as Record<string, unknown>[]).filter(
+                (item): item is { name: string; value: number } =>
+                    typeof item === 'object' &&
+                    item !== null &&
+                    'name' in item &&
+                    'value' in item &&
+                    typeof item.name === 'string' &&
+                    typeof item.value === 'number'
+            );
+            const auditResult = auditorA.auditFinalReport(data, reportData);
             return {
                 report: reportResult.report,
                 auditPassed: auditResult.passed,
@@ -291,20 +301,20 @@ export class ManagerAgent extends AgentBase {
 
     // ── Schema Analysis Pipeline ──────────────────────────────
 
-    public async processSchemaAndQuestions(data: any[]): Promise<{ schema: any; questions: any[] }> {
+    public async processSchemaAndQuestions(data: Record<string, unknown>[]): Promise<{ schema: SchemaMap; questions: QuestionOption[] }> {
         const sessionBus = new AgentBus(this.sessionId);
         const schemaA = new SchemaAgent(`schema-${Date.now()}`, this.tenantId, sessionBus);
         const compA = new ComprehensionAgent(`comp-${Date.now()}`, this.tenantId, sessionBus);
 
         try {
-            return await this.withTimeout<{ schema: any; questions: any[] }>(
+            return await this.withTimeout<{ schema: SchemaMap; questions: QuestionOption[] }>(
                 new Promise((resolve, reject) => {
-                    let discoveredSchema: any = null;
+                    let discoveredSchema: SchemaMap | null = null;
 
                     sessionBus.subscribe(this.id, (msg) => {
                         try {
                             if (msg.type === 'SCHEMA_ANALYZED') {
-                                discoveredSchema = msg.payload.schema;
+                                discoveredSchema = (msg.payload as { schema: SchemaMap }).schema;
                                 sessionBus.publish({
                                     from: this.id,
                                     to: compA.id,
@@ -312,7 +322,10 @@ export class ManagerAgent extends AgentBase {
                                     payload: { schema: discoveredSchema }
                                 });
                             } else if (msg.type === 'QUESTIONS_GENERATED') {
-                                resolve({ schema: discoveredSchema, questions: msg.payload.questions });
+                                resolve({
+                                    schema: discoveredSchema ?? {},
+                                    questions: (msg.payload as { questions: QuestionOption[] }).questions
+                                });
                             }
                         } catch (err) {
                             reject(err);
@@ -335,31 +348,37 @@ export class ManagerAgent extends AgentBase {
         }
     }
 
-    public async generateFinalReport(data: any[], schema: any, answers: any): Promise<{ report: any }> {
+    public async generateFinalReport(
+        data: Record<string, unknown>[],
+        schema: SchemaMap,
+        answers: Record<string, string>
+    ): Promise<{ report: ReportConfig }> {
         const sessionBus = new AgentBus(this.sessionId);
         const specA = new SpecialistAgent(`specialist-${Date.now()}`, this.tenantId, sessionBus);
         const valA = new ValidatorAgent(`validator-${Date.now() + 1}`, this.tenantId, sessionBus);
         const reportA = new ReportAgent(`fallback-report-${Date.now() + 2}`, this.tenantId, sessionBus);
 
         try {
-            return await this.withTimeout<{ report: any }>(
+            return await this.withTimeout<{ report: ReportConfig }>(
                 new Promise((resolve, reject) => {
                     sessionBus.subscribe(this.id, (msg) => {
                         try {
                             if (msg.type === 'CODE_CREATED') {
-                                if (msg.payload.error) {
+                                const payload = msg.payload as SpecialistCodeResult;
+                                if (payload.error) {
                                     sessionBus.publish({ from: this.id, to: reportA.id, type: 'GENERATE_REPORT', payload: { data, schema, answers } });
                                 } else {
-                                    sessionBus.publish({ from: this.id, to: valA.id, type: 'VALIDATE_CODE', payload: { code: msg.payload.code, data } });
+                                    sessionBus.publish({ from: this.id, to: valA.id, type: 'VALIDATE_CODE', payload: { code: payload.code, data } });
                                 }
                             } else if (msg.type === 'CODE_VALIDATED') {
-                                if (!msg.payload.valid) {
+                                const payload = msg.payload as ValidatorResult;
+                                if (!payload.valid) {
                                     sessionBus.publish({ from: this.id, to: reportA.id, type: 'GENERATE_REPORT', payload: { data, schema, answers } });
                                 } else {
-                                    resolve({ report: msg.payload.reportConfig });
+                                    resolve({ report: payload.reportConfig ?? { data: [], message: 'No se pudo generar el reporte.' } });
                                 }
                             } else if (msg.type === 'REPORT_GENERATED') {
-                                resolve({ report: msg.payload.reportConfig });
+                                resolve({ report: (msg.payload as { reportConfig: ReportConfig }).reportConfig });
                             }
                         } catch (err) {
                             reject(err);
@@ -390,8 +409,8 @@ export class ManagerAgent extends AgentBase {
      * schema and data for SQL-based answering.
      */
     public async processChat(
-        data: any[],
-        schema: any,
+        data: Record<string, unknown>[],
+        schema: SchemaMap,
         question: string
     ): Promise<ChatResult> {
         const sessionBus = new AgentBus(this.sessionId);

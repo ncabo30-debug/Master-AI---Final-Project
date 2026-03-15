@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \":*)",
+      "Bash(find 'C:/Users/Keyrus/OneDrive - Keyrus/Escritorio/Projecto Final Master IA/datalens-app' -maxdepth 2 -name tailwind.config.* -o -name globals.css)",
+      "Bash(find 'C:/Users/Keyrus/OneDrive - Keyrus/Escritorio/Projecto Final Master IA/datalens-app' -name *.css -type f)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

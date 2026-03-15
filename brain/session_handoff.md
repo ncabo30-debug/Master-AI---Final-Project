@@ -1,54 +1,38 @@
-# 📋 Session Handoff — 2026-03-07
+# Session Handoff - 2026-03-15 (post pruebas en vivo)
 
-## Estado del proyecto
-Build: ✅ `npx next build` exitoso (6.6s)
-Framework: Next.js 16.1.6 (Turbopack)
-LLM: Gemini 2.5 Flash / Pro via `@google/generative-ai`
+## Pendientes reales
 
-## Lo hecho hoy
+### Punto pendiente funcional
+- **Configuracion de agrupacion del dashboard reubicada pero aun no conectada**: Se saco `ComprehensionPanel` de `SchemaValidationFlow` porque la eleccion temprana de dimension (`q1`) estaba adelantada y no impactaba de forma real en el flujo posterior. Ahora hay avisos en `SchemaValidationFlow.tsx` y `VizProposalPanel.tsx`, pero falta implementar la conexion correcta de esa preferencia en la etapa de seleccion/generacion de visualizaciones. Retomar desde `VizProposalPanel`, `generate_dashboard` y, si aplica, `VizExpertAgent` o `ReportAgent`.
 
-| Cambio | Archivos principales |
-|---|---|
-| Fix modelos LLM (404 → 200) | `LLMService.ts` |
-| Token tracking + widget costo USD | `TokenTracker.ts`, `TokenUsageWidget.tsx`, `/api/admin/tokens` |
-| AnalystAgent prompt reescrito | `AnalystAgent.ts` |
-| Outlier summary con valores específicos | `route.ts` (clean_data action) |
-| AgentFlowVisualizer rediseñado | `AgentFlowVisualizer.tsx` |
-| DashboardContent sanitización | `DashboardContent.tsx` |
-| Auditoría end-to-end (7 bugs encontrados) | Documentado en `task.md` |
+### Bug pendiente de confirmación
+- **Freeze en tabla de SchemaValidationFlow**: El selector de rol semántico en `InteractiveSheet` (ej: columna `product_name`) seguía causando freeze según el usuario durante pruebas en vivo. Se aplicaron fixes (useCallback, data slice a 50 filas, guard en runPipelinePhase2) pero **no se confirmó resolución** — el usuario interrumpió antes de terminar la prueba. Verificar en próxima sesión subiendo un CSV y tocando el selector de rol en la vista AWAITING_VALIDATION.
 
-## Para la próxima sesión
+### Deuda técnica de la sesión anterior (sin tocar en esta sesión)
+- Los botones decorativos de `DashboardContent` siguen siendo deuda técnica si se espera funcionalidad real.
+- El insight del dashboard sigue sin conectarse a un `StrategyAgent`.
 
-### Arrancar por estos 7 bugs (en orden de prioridad):
+### Roadmap funcional no implementado aún
+- Persistencia real de `schema_blueprints` y `anomalies` en Supabase (actualmente todo es in-memory por sesión).
+- Tabla `calculations` auditables + integración en `ManagerAgent`.
+- `DataTable` con AG Grid (filtros, sorting, export CSV, columnas pineadas).
+- Integración `DataTable` <-> chat para revisar filas puntuales con AI.
+- `CrossReferenceAgent` para análisis cruzado visual entre archivos (era roadmap del multi-archivo doc).
+- Manager multi-intento con clasificación de intención.
+- `StrategyAgent` para respuestas gerenciales.
 
-1. **BUG 1** (CRITICAL): `page.tsx` L48/L175 — `DELETE /api/admin/logs` sin `sessionId` → logs nunca se borran
-2. **BUG 3** (HIGH): `AnalysisPanel.tsx` L77 — `generateAnalysis()` en render body (no `useEffect`)
-3. **BUG 4** (HIGH): `VizProposalPanel.tsx` L53 — `loadProposals()` en render body
-4. **BUG 2** (MEDIUM): `AnalysisPanel.tsx` L134 — markdown mostrado como texto crudo (instalar `react-markdown`)
-5. **BUG 6** (LOW): `AnalysisPanel.tsx` — inline styles dark-only, no respeta light theme
-6. **BUG 5** (LOW): `ComprehensionPanel.tsx` L4 — import `lucide-react` sin usar
-7. **BUG 7** (LOW): `TokenUsageWidget.tsx` — icon "token" no existe en Material Symbols
-
-### Luego implementar:
-- **Outlier highlighting** en `InteractiveSheet.tsx`: recibir `outlierReport` como prop, marcar celdas fuera de rango con fondo naranja + tooltip
-
-### Deuda técnica arrastrada (sesión 01/03/2026, no resuelto aún):
-
-#### Backend
-- [ ] **DRY column extraction**: `ReportAgent.ts` L23-29 y `ComprehensionAgent.ts` L25-29 tienen la misma lógica para extraer `numericCols`/`categoryCols`. Crear helper `extractColumnsByType(schema)` en `agents/utils.ts`.
-- [ ] **AgentBus `unsubscribe()`**: Los agentes se suscriben al bus en su constructor pero no se desuscriben al limpiarse del Registry. Agregar `unsubscribe(agentId)` y llamarlo desde `AgentRegistry.unregister()`.
-- [ ] **`globalBus` exportado pero no usado**: `AgentBus.ts` exporta `globalBus` que nadie importa. Eliminar o documentar para Fase 4.
-
-#### Frontend
-- [ ] **DashboardContent botones decorativos**: "Exportar CSV" y "Nuevo Gráfico" no tienen `onClick` handler. Implementar funcionalidad o eliminar hasta Fase 4.
-- [ ] **DashboardContent insight hardcodeado**: El panel "Insight Generado" muestra texto estático. Conectar al `StrategyAgent` en Fase 4.
-- [ ] **InteractiveSheet override no propaga**: Los botones ✓/✏️ funcionan visualmente pero el override de `semantic_role` no se envía de vuelta al backend/SchemaAgent.
-
-### Referencia rápida de arquitectura
-```
-Frontend: page.tsx → [FileUploader, InteractiveSheet, ComprehensionPanel, AnalysisPanel, VizProposalPanel, Dashboard]
-API: /api/analyze (POST con actions: clean_data, analyze_schema, generate_analysis, etc.)
-Backend: ManagerAgent → [ProfilerAgent, CleanerAgent, SchemaAgent, ComprehensionAgent, AnalystAgent, VizExpertAgent, SpecialistAgent, ValidatorAgent]
-Tracking: TokenTracker (session-scoped) + AgentLogger + AgentBus (session-isolated)
-```
-
+## Ya no hace falta tratar como pendiente
+- Dots de estado en sidebar: visibles (fix con `inline-block` explícito en `FileListItem` y `StatusLegend`).
+- Header de archivo en `TabbedFileView`: nombre, filas, columnas y badge "Listo" añadidos.
+- Rediseño UX multi-archivo: **implementado y compilando**.
+  - Sidebar de archivos con estados en tiempo real (dots animados).
+  - Procesamiento paralelo con cola (máx. 2 activos, AWAITING_VALIDATION no cuenta slot).
+  - 5 pestañas de trazabilidad por archivo: Archivo original, Esquema, Normalización, Validación, Dashboard.
+  - Chat global multi-archivo en barra fija al fondo.
+  - Upload drag-and-drop múltiple en sidebar.
+  - Vista AdminView extraída (AgentTerminal + AgentFlowVisualizer).
+  - Todos los componentes existentes reutilizados sin modificarse.
+  - Backend intacto (route.ts, DataStore, agentes).
+- Bugs de la tanda anterior: todos cerrados (logs, markdown, side effects, lint, tipos).
+- `schema_blueprints` v1 implementado (in-memory por sesión).
+- Limpieza global de lint: `npm run lint` OK, `npx tsc --noEmit` OK, `npm run build` OK (al final de la sesión anterior).

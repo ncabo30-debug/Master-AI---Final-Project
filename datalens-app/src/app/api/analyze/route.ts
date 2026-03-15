@@ -4,9 +4,11 @@ import { AgentBus } from '@/lib/agents/core/AgentBus';
 import {
     storeData, getData, getExcelBuffer, getProfile,
     storeCleaningResult, generateSessionId,
-    updateSession, getAnalysis, getSummaries, getSchema
+    updateSession, getAnalysis, getSummaries, getSchema, getSchemaBlueprint
 } from '@/lib/DataStore';
 import { translateError } from '@/lib/ErrorTranslator';
+import { applyBlueprintOverride, blueprintToSchema, schemaToBlueprint } from '@/lib/agents/schemaBlueprint';
+import type { EnrichedSchemaField } from '@/lib/agents/types';
 
 /**
  * Allow long-running requests for Gemini API inference.
@@ -132,8 +134,37 @@ export async function POST(req: Request) {
         if (action === 'analyze_schema') {
             console.log(`[API] Iniciando análisis y preguntas para ${resolvedData!.length} filas.`);
             const analysisResult = await manager.processSchemaAndQuestions(resolvedData!);
-            updateSession(sessionId!, { schema: analysisResult.schema, questions: analysisResult.questions });
-            return NextResponse.json({ ...analysisResult, sessionId });
+            const schemaBlueprint = schemaToBlueprint(sessionId!, analysisResult.schema);
+            updateSession(sessionId!, {
+                schema: analysisResult.schema,
+                schemaBlueprint,
+                questions: analysisResult.questions
+            });
+            return NextResponse.json({ ...analysisResult, schemaBlueprint, sessionId });
+        }
+
+        // ── ACTION: save_schema_override ──
+        if (action === 'save_schema_override') {
+            if (!sessionId) {
+                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
+            }
+
+            const currentBlueprint = getSchemaBlueprint(sessionId);
+            if (!currentBlueprint) {
+                return NextResponse.json({ error: 'Schema blueprint not found for session.' }, { status: 404 });
+            }
+
+            const column = typeof body.column === 'string' ? body.column : '';
+            const semanticRole = body.semanticRole as EnrichedSchemaField['semantic_role'] | undefined;
+
+            if (!column || !semanticRole) {
+                return NextResponse.json({ error: 'column and semanticRole are required.' }, { status: 400 });
+            }
+
+            const nextBlueprint = applyBlueprintOverride(currentBlueprint, column, semanticRole);
+            const nextSchema = blueprintToSchema(nextBlueprint);
+            updateSession(sessionId, { schema: nextSchema, schemaBlueprint: nextBlueprint });
+            return NextResponse.json({ schema: nextSchema, schemaBlueprint: nextBlueprint, sessionId });
         }
 
         // ── ACTION: generate_analysis ── (Phase 2)
@@ -254,14 +285,14 @@ export async function POST(req: Request) {
 
         return NextResponse.json({ error: 'Invalid action provided.' }, { status: 400 });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('[API] Error in analyze route:', error);
-        const translated = translateError(error, action);
+        const translated = translateError(error instanceof Error ? error : String(error), action);
         return NextResponse.json(
             {
                 error: translated.userMessage,
                 suggestion: translated.suggestion,
-                technicalDetail: process.env.NODE_ENV === 'development' ? error.message : undefined
+                technicalDetail: process.env.NODE_ENV === 'development' && error instanceof Error ? error.message : undefined
             },
             { status: 500 }
         );

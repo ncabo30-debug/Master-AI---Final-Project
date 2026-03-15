@@ -1,4 +1,4 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -17,9 +17,12 @@ export class OutlierDetectorAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'DETECT_OUTLIERS') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                data: Record<string, unknown>[];
+                profile: ProfileResult;
+            });
             this.communicate(message.from, 'OUTLIERS_DETECTED', result);
         }
     }

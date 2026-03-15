@@ -1,0 +1,337 @@
+Plan: DataLens AI — Rediseño UX Multi-Archivo
+Contexto
+El documento multi_archivo_tecnico.docx define un cambio mayor de UX: pasar de un wizard secuencial de 6 pasos (un archivo) a una interfaz sidebar de archivos + área principal con pestañas de trazabilidad, soportando múltiples archivos con procesamiento paralelo controlado.
+
+Principio clave: El backend (route.ts, DataStore, todos los agentes) no cambia. Ya es session-keyed, por lo que múltiples sessionId paralelos ya funcionan. El cambio es 100% en el frontend. Todos los componentes existentes se reutilizan vía props sin modificarse.
+
+Herramientas a usar:
+
+GSD (IMPROVERS/get-shit-done-main): Framework de desarrollo spec-driven para estructurar la ejecución por fases con agentes paralelos
+UI/UX Pro Max (IMPROVERS/ui-ux-pro-max-skill-main): Base de datos de patrones de diseño — usar python3 src/ui-ux-pro-max/scripts/search.py para consultar estilos, colores, UX guidelines, antes de implementar cada fase
+Nueva Arquitectura UX
+Layout
+
+┌──────────────────────────────────────────────────────────────────┐
+│  SIDEBAR (220px)          │  ÁREA PRINCIPAL (flex-1)             │
+│  ─────────────────────── │  ────────────────────────────────── │
+│  Logo DataLens AI          │  [Si no hay archivo seleccionado]   │
+│                            │    EmptyState + drop zone           │
+│  [+] Agregar archivos      │                                      │
+│  ┌──────────────────────┐ │  [Si AWAITING_VALIDATION]            │
+│  │ 🟡 ventas_2024.csv  │ │    SchemaValidationFlow (pantalla    │
+│  │    Detectando schema │ │    completa, sin tabs)               │
+│  ├──────────────────────┤ │                                      │
+│  │ 🔴 gastos_q1.csv    │ │  [Si READY] 5 pestañas:              │
+│  │    Requiere atención │ │  [Archivo✓][Esquema✓][Norm✓][Val✓][Dashboard✓]│
+│  ├──────────────────────┤ │                                      │
+│  │ 🟢 inventario.csv   │ │  ─────────────────────────────────  │
+│  │    Listo             │ │  Chat global · N archivos disponibles│
+│  └──────────────────────┘ │  [_______________________________] → │
+│                            │                                      │
+│  ● Verde = Listo           │                                      │
+│  ● Amarillo = Procesando   │                                      │
+│  ● Rojo = Atención/Error   │                                      │
+│  ● Gris = En cola          │                                      │
+│                            │                                      │
+│  [TokenUsageWidget]        │                                      │
+│  [Admin →]                 │                                      │
+└──────────────────────────────────────────────────────────────────┘
+Estados de archivo
+Estado	Color dot	Cuenta slot cola
+QUEUED	Gris	No
+PARSING	Amarillo pulse	Sí
+SCHEMA_DETECTION	Amarillo pulse	Sí
+NORMALIZING	Amarillo pulse	Sí
+VALIDATING	Amarillo pulse	Sí
+AWAITING_VALIDATION	Rojo pulse	No (pausado)
+READY	Verde	No
+ERROR	Rojo fijo	No
+Concurrencia máxima: 2 archivos en estados activos (amarillo) simultáneamente.
+
+5 Pestañas (archivo READY)
+Pestaña	Componente usado	Datos
+Archivo original	InteractiveSheet (sin schema)	file.rawData
+Esquema	SchemaTab (nuevo)	file.schemaBlueprint
+Normalización	NormalizationTab (nuevo)	diff raw vs cleaned
+Validación	ValidationTab (nuevo)	file.dataAnomalies
+Dashboard	AnalysisPanel → VizProposalPanel → Dashboard	file.reportConfig
+El tab Dashboard muestra progresivamente: si analysis === null → AnalysisPanel; si reportConfig === null → VizProposalPanel; si completo → Dashboard.
+
+Estado Multi-Archivo (Client-Side)
+
+// FileRecord: unidad de estado por archivo
+interface FileRecord {
+  fileId:          string           // uuid cliente
+  fileName:        string
+  sessionId:       string | null    // asignado tras clean_data
+  status:          FileStatus
+  rawData:         Record<string,unknown>[] | null
+  cleanedData:     Record<string,unknown>[] | null
+  schema:          SchemaMap | null
+  schemaBlueprint: SchemaBlueprint | null
+  questions:       QuestionOption[] | null
+  analysis:        string | null
+  analysisApproved: boolean
+  vizProposals:    VizProposal[] | null
+  reportConfig:    ReportConfig | null
+  dataAnomalies:   DataAnomaly[]
+  auditPassed:     boolean | null
+  activeTab:       'original'|'schema'|'normalization'|'validation'|'dashboard'
+  error:           string | null
+}
+
+// Estado global en page.tsx
+Map<fileId, FileRecord>  →  gestionado por useFileQueue()
+string | null            →  selectedFileId
+Fases de Implementación
+FASE 1 — Tipos y State Machine (sin UI) ✦ Empezar aquí
+Archivos a CREAR:
+
+datalens-app/src/lib/fileQueue.ts
+
+FileStatus union type (8 estados)
+FileRecord interface
+FILE_STATUS_LABEL y FILE_STATUS_DOT_CLASS (mappings)
+createFileRecord(fileName, rawData): FileRecord
+getActiveProcessingCount(files: Map): number — cuenta slots amarillos
+canStartProcessing(files: Map): boolean — < 2 activos
+getReadyFiles(files: Map): FileRecord[]
+datalens-app/src/lib/csvParser.ts
+
+parseCSVFile(file: File): Promise<Record<string,unknown>[]> — extrae la lógica de PapaParse de FileUploader.tsx aquí
+datalens-app/src/lib/useFileQueue.ts (hook central)
+
+files: Map<string, FileRecord>
+enqueueFiles(rawFiles: File[]): void — parsea CSVs, crea records, inicia pipeline si hay slot
+updateFile(fileId, patch): void — setFiles(new Map(prev).set(id, {...record, ...patch}))
+confirmSchema(fileId): void — transiciona AWAITING_VALIDATION → NORMALIZING, continúa pipeline
+handleSchemaOverride(fileId, col, role): Promise<void> — llama save_schema_override
+reviseAnalysis(fileId, feedback): Promise<void> — llama revise_analysis
+validateAndGenerateDashboard(fileId, viz, answers): Promise<void>
+removeFile(fileId): void — llama clearSessionLogs si tiene sessionId
+runPipeline(fileId): Promise<void> — orquesta el pipeline completo:
+PARSING → clean_data → salva sessionId, cleanedData, dataAnomalies
+SCHEMA_DETECTION → analyze_schema → salva schema, schemaBlueprint, questions
+AWAITING_VALIDATION → PAUSA (espera confirmSchema)
+NORMALIZING → generate_analysis → salva analysis
+VALIDATING → propose_visualizations → salva vizProposals
+READY (el resto se hace on-demand: validate_viz, generate_dashboard)
+Todo el pipeline en try/catch → ERROR si falla
+datalens-app/src/lib/useMultiChat.ts
+
+chatHistory: ChatMessage[]
+sendMessage(text): Promise<void> → llama chat action con sessionId del archivo seleccionado
+readyFilesCount: number
+FASE 2 — Layout Shell (chrome de la nueva UI)
+Archivos a CREAR en datalens-app/src/components/layout/:
+
+FileSidebar.tsx
+
+Props: files, selectedFileId, onSelectFile, onAddFiles, sessionId, onOpenAdmin
+Contiene: logo, FileDropTarget, lista de FileListItem, StatusLegend, TokenUsageWidget, botón Admin
+FileListItem.tsx
+
+Dot animado según status (FILE_STATUS_DOT_CLASS)
+Nombre truncado + title attr con nombre completo
+Texto status debajo (FILE_STATUS_LABEL)
+Click → onSelectFile(fileId)
+StatusLegend.tsx
+
+4 filas: ● Gris=Cola, ● Amarillo=Procesando, ● Rojo=Atención, ● Verde=Listo
+FileDropTarget.tsx
+
+<input type="file" multiple accept=".csv" /> oculto
+Botón "+" que abre el picker
+Zona drag-and-drop sobre el sidebar
+On drop/change → parseCSVFile por cada archivo → onAddFiles(files)
+GlobalChatBar.tsx
+
+Fijo al fondo del área principal
+Colapsado: input + hint "Chat global · N archivos disponibles"
+Expandido: historial de chat arriba del input
+Deshabilitado si readyFilesCount === 0
+AdminView.tsx
+
+Extrae el contenido del "Step 6" actual de page.tsx
+Props: sessionId, onBack
+Contiene AgentTerminal + AgentFlowVisualizer con el tab toggle existente
+EmptyState.tsx
+
+Pantalla centrada cuando no hay archivo seleccionado
+Drop zone grande con instrucciones
+Reutiliza FileUploader o usa FileDropTarget directamente
+ProcessingSpinner.tsx
+
+Spinner full-area para estados amarillos
+Muestra FILE_STATUS_LABEL[file.status] + animación
+Archivo a REESCRIBIR:
+
+datalens-app/src/app/page.tsx
+
+
+export default function Home() {
+  const queue = useFileQueue()
+  const chat = useMultiChat(queue.readyFiles)
+  const [showAdmin, setShowAdmin] = useState(false)
+  const [chatExpanded, setChatExpanded] = useState(false)
+
+  if (showAdmin) return <AdminView sessionId={queue.selectedFile?.sessionId} onBack={() => setShowAdmin(false)} />
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-background-dark">
+      <FileSidebar
+        files={queue.files}
+        selectedFileId={queue.selectedFileId}
+        onSelectFile={queue.setSelectedFileId}
+        onAddFiles={queue.enqueueFiles}
+        sessionId={queue.selectedFile?.sessionId ?? null}
+        onOpenAdmin={() => setShowAdmin(true)}
+      />
+      <main className="flex-1 flex flex-col min-w-0 relative">
+        <FileMainArea file={queue.selectedFile} queue={queue} />
+        <GlobalChatBar
+          readyFilesCount={chat.readyFilesCount}
+          chatHistory={chat.chatHistory}
+          isTyping={chat.isTyping}
+          onSend={chat.sendMessage}
+          isExpanded={chatExpanded}
+          onToggleExpand={() => setChatExpanded(v => !v)}
+        />
+      </main>
+    </div>
+  )
+}
+FASE 3 — Área Principal con Pestañas
+Archivos a CREAR:
+
+FileMainArea.tsx
+
+Router por file.status:
+null/undefined → <EmptyState />
+QUEUED → mensaje "En cola para procesamiento"
+PARSING|SCHEMA_DETECTION|NORMALIZING|VALIDATING → <ProcessingSpinner file={file} />
+AWAITING_VALIDATION → <SchemaValidationFlow file={file} queue={queue} />
+READY → <TabbedFileView file={file} queue={queue} />
+ERROR → panel de error con mensaje + botón retry
+SchemaValidationFlow.tsx (cuando AWAITING_VALIDATION)
+
+Banner: "Detectamos estas columnas. ¿Podés confirmar que los tipos son correctos?"
+<InteractiveSheet data={file.cleanedData} schema={file.schema} onSchemaOverride={...} /> (sin cambios)
+<ComprehensionPanel questions={file.questions} onSubmitAnswers={...} /> (sin cambios, botón "Confirmar y Continuar")
+On submit → queue.confirmSchema(file.fileId)
+TabbedFileView.tsx (cuando READY)
+
+Tab bar con 5 pestañas + checkmark (✓) si datos presentes
+Default: dashboard
+Routing de contenido por file.activeTab
+SchemaTab.tsx
+
+Tabla: Columna / Tipo / Rol Semántico (badge con color) / Dominio
+Reutiliza estilos de tabla de InteractiveSheet
+NormalizationTab.tsx
+
+Compara file.rawData[i] vs file.cleanedData[i] por columna
+Badge "Corregido" (amber) si difiere, "Limpio" (green) si igual
+Resumen: "X transformaciones aplicadas en Y columnas"
+ValidationTab.tsx
+
+Agrupa file.dataAnomalies por tipo
+Scorecard: "X checks pasados, Y advertencias"
+Cada check con ✓/✗ y descripción
+FASE 4 — CSS y Estilos de Estado
+Archivo a MODIFICAR:
+
+datalens-app/src/app/globals.css
+
+
+/* Status dots — definidos explícitamente para que Tailwind no los purgue */
+.dot-queued              { @apply bg-slate-400; }
+.dot-processing          { @apply bg-yellow-400 animate-pulse; }
+.dot-awaiting            { @apply bg-red-400 animate-pulse; }
+.dot-ready               { @apply bg-green-400; }
+.dot-error               { @apply bg-red-500; }
+Consulta UI/UX Pro Max antes de esta fase:
+
+
+python3 "IMPROVERS/ui-ux-pro-max-skill-main/src/ui-ux-pro-max/scripts/search.py" "data analytics dashboard sidebar file management" --domain ux
+python3 "IMPROVERS/ui-ux-pro-max-skill-main/src/ui-ux-pro-max/scripts/search.py" "status indicators pulse animation" --domain style
+python3 "IMPROVERS/ui-ux-pro-max-skill-main/src/ui-ux-pro-max/scripts/search.py" "tabbed interface audit traceability" --domain ux
+FASE 5 — Ajustes Menores y Verificación
+datalens-app/src/components/FileUploader.tsx
+
+Extraer la lógica de PapaParse a csvParser.ts
+El componente queda igual visualmente (usado en EmptyState)
+DashboardContent.tsx — verificar que ResponsiveContainer no colapse en contexto de pestaña
+
+Si colapsa: agregar height: 'calc(100vh - 240px)' al wrapper del tab dashboard
+TokenUsageWidget.tsx — sin cambios, recibe sessionId del archivo seleccionado
+
+Mapeo de Llamadas API (sin cambios al backend)
+Acción actual	Nueva ubicación	Trigger
+clean_data	useFileQueue.runPipeline	Auto al encolar
+analyze_schema	useFileQueue.runPipeline	Tras clean_data
+save_schema_override	useFileQueue.handleSchemaOverride	Click en InteractiveSheet
+generate_analysis	useFileQueue.runPipeline (2ª mitad)	Tras confirmSchema
+revise_analysis	useFileQueue.reviseAnalysis	Feedback en AnalysisPanel
+propose_visualizations	useFileQueue.runPipeline	Tras generate_analysis
+validate_viz	useFileQueue.validateAndGenerateDashboard	Selección en VizProposalPanel
+generate_dashboard	useFileQueue.validateAndGenerateDashboard	Tras validate_viz exitoso
+chat	useMultiChat.sendMessage	Input en GlobalChatBar
+Archivos que NO SE TOCAN
+
+src/app/api/analyze/route.ts          ← cero cambios
+src/app/api/admin/**                  ← cero cambios
+src/lib/DataStore.ts                  ← cero cambios
+src/lib/agents/**  (todos)            ← cero cambios
+src/components/InteractiveSheet.tsx   ← reutilizado vía props
+src/components/ComprehensionPanel.tsx ← reutilizado vía props
+src/components/AnalysisPanel.tsx      ← reutilizado vía props
+src/components/VizProposalPanel.tsx   ← reutilizado vía props
+src/components/Dashboard.tsx          ← reutilizado vía props
+src/components/DashboardContent.tsx   ← reutilizado vía props
+src/components/AgentTerminal.tsx      ← reutilizado en AdminView
+src/components/AgentFlowVisualizer.tsx← reutilizado en AdminView
+src/components/TokenUsageWidget.tsx   ← reutilizado en FileSidebar
+Archivos Nuevos (resumen)
+
+src/lib/fileQueue.ts                         (tipos + utilidades puras)
+src/lib/csvParser.ts                         (PapaParse utility)
+src/lib/useFileQueue.ts                      (hook central ← más crítico)
+src/lib/useMultiChat.ts                      (hook de chat global)
+src/components/layout/FileSidebar.tsx
+src/components/layout/FileListItem.tsx
+src/components/layout/StatusLegend.tsx
+src/components/layout/FileDropTarget.tsx
+src/components/layout/GlobalChatBar.tsx
+src/components/layout/AdminView.tsx
+src/components/layout/EmptyState.tsx
+src/components/layout/ProcessingSpinner.tsx
+src/components/layout/FileMainArea.tsx
+src/components/layout/TabbedFileView.tsx
+src/components/layout/SchemaValidationFlow.tsx
+src/components/layout/SchemaTab.tsx
+src/components/layout/NormalizationTab.tsx
+src/components/layout/ValidationTab.tsx
+Modificados: page.tsx (reescritura), FileUploader.tsx (extracción menor), globals.css (clases status dot)
+
+Verificación End-to-End
+Subir 1 archivo → aparece en sidebar → dot amarillo pulsando → llega a AWAITING_VALIDATION (rojo) → confirmar schema → sigue procesando → READY (verde)
+Tab Dashboard → se ve el chart de Recharts correctamente
+Tab Archivo original → primeras 50 filas sin modificar
+Tab Esquema → Blueprint con tipos y roles semánticos
+Tab Normalización → diff raw vs cleaned con badges
+Tab Validación → anomalías con pass/fail
+Subir 2 archivos simultáneos → ambos procesan en paralelo (dots amarillos)
+Subir 3 archivos → 2 procesan, 1 queda en QUEUED (gris) → cuando uno llega a READY, el tercero empieza
+Chat global → hint "Chat global · N archivos disponibles" → responde con datos del archivo seleccionado
+Admin view → click "Admin →" en sidebar → AgentTerminal y AgentFlowVisualizer funcionan igual
+TokenUsageWidget → se actualiza cada 5s con la sesión del archivo seleccionado
+No hay errores de TypeScript → npx tsc --noEmit pasa sin errores
+ResponsiveContainer de Recharts → el chart tiene altura visible dentro del tab
+Riesgos y Mitigaciones
+Riesgo	Mitigación
+Map no dispara re-render en React	Siempre setFiles(new Map(prev).set(...)) — nunca mutar el Map in-place
+Pipeline falla sin actualizar status	Todo runPipeline en try/catch global → siempre setea ERROR
+ResponsiveContainer colapsa en tab	Wrapper del tab con h-[calc(100vh-200px)] explícito
+Tailwind purga clases de status dot	Definir clases en globals.css con @apply, no strings dinámicos
+AWAITING_VALIDATION ocupa slot de cola	getActiveProcessingCount excluye este estado explícitamente

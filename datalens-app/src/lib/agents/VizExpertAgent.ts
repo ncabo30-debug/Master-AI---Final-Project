@@ -1,8 +1,8 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
-import { LLMService, LLM_TIMEOUT_MS } from './core/LLMService';
+import { LLMService } from './core/LLMService';
 import type { VizProposal, VizProposalsResult, ProfileResult } from './types';
 
 /**
@@ -15,9 +15,12 @@ export class VizExpertAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'PROPOSE_VISUALIZATIONS') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                analysis: string;
+                profile: ProfileResult;
+            });
             this.communicate(message.from, 'VISUALIZATIONS_PROPOSED', result);
         }
     }

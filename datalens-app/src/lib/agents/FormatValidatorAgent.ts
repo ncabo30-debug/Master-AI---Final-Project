@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -16,9 +16,12 @@ export class FormatValidatorAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'VALIDATE_FORMAT') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                excelBuffer: Uint8Array;
+                profile: ProfileResult;
+            });
             this.communicate(message.from, 'FORMAT_VALIDATED', result);
         }
     }
@@ -33,7 +36,7 @@ export class FormatValidatorAgent extends AgentBase {
 
         try {
             const workbook = new ExcelJS.Workbook();
-            await workbook.xlsx.load(Buffer.from(excelBuffer) as any);
+            await workbook.xlsx.load(Buffer.from(excelBuffer) as unknown as Parameters<typeof workbook.xlsx.load>[0]);
 
             const sheet = workbook.getWorksheet(1);
             if (!sheet) {
@@ -92,8 +95,9 @@ export class FormatValidatorAgent extends AgentBase {
                     break;
                 }
             }
-        } catch (err: any) {
-            errors.push(`Error leyendo el Excel: ${err.message}`);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            errors.push(`Error leyendo el Excel: ${message}`);
         }
 
         AgentLogger.logExecution(this.id, Date.now() - start);

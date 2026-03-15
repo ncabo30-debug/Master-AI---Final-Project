@@ -1,11 +1,9 @@
-import { AgentLogger } from './AgentLogger';
-
 export type AgentMessage = {
     id: string;
     from: string;
     to: string;
     type: string;
-    payload: any;
+    payload: unknown;
     timestamp: number;
 };
 

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 C:/Users/Keyrus/OneDrive - Keyrus/Escritorio/Projecto Final Master IA/IMPROVERS/.claude/hooks/carl-hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}

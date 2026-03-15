@@ -1,4 +1,4 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -11,9 +11,13 @@ export class ReportAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'GENERATE_REPORT') {
-            const reportConfig = await this.execute(message.payload);
+            const reportConfig = await this.execute(message.payload as {
+                data: Record<string, unknown>[];
+                schema: SchemaMap;
+                answers?: Record<string, string>;
+            });
             this.communicate(message.from, 'REPORT_GENERATED', { reportConfig });
         }
     }
@@ -24,7 +28,7 @@ export class ReportAgent extends AgentBase {
         const { numericCols, categoryCols } = extractColumnsByType(schema);
 
         if (numericCols.length === 0) {
-            return { type: 'table', data: data.slice(0, 100) as any, message: "No se encontraron datos numéricos para graficar." };
+            return { type: 'table', data: data.slice(0, 100), message: "No se encontraron datos numéricos para graficar." };
         }
 
         const yAxis = numericCols[0];
@@ -56,7 +60,7 @@ export class ReportAgent extends AgentBase {
             }
         } catch (err) {
             AgentLogger.error(this.id, err);
-            return { type: 'table', data: data.slice(0, 50) as any, message: "Falló la generación estática." };
+            return { type: 'table', data: data.slice(0, 50), message: "Falló la generación estática." };
         }
 
         return { type: 'bar', xAxis: 'name', yAxis: 'value', data: aggregatedData, title: `Análisis de ${yAxis} por ${xAxis}` };

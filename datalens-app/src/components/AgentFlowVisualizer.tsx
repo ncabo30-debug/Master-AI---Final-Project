@@ -1,9 +1,27 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, { Background, Controls, Node, Edge, MarkerType } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { AgentMessage } from '@/lib/agents/core/AgentBus';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function getPayloadDuration(payload: unknown): number | null {
+    if (!isRecord(payload) || typeof payload.durationMs !== 'number') return null;
+    return payload.durationMs;
+}
+
+function getPayloadMessage(payload: unknown): string | null {
+    if (!isRecord(payload) || typeof payload.message !== 'string') return null;
+    return payload.message;
+}
+
+function isLLMTracePayload(payload: unknown): payload is { prompt: string; response: string; durationMs?: number } {
+    return isRecord(payload) && typeof payload.prompt === 'string' && typeof payload.response === 'string';
+}
 
 // ── Agent identity extraction ──────────────────────────
 function getAgentType(agentId: string): string {
@@ -89,9 +107,9 @@ const NODE_W = 180;
 
 export default function AgentFlowVisualizer({ sessionId }: { sessionId?: string | null }) {
     const [logs, setLogs] = useState<AgentMessage[]>([]);
-    const [selectedPayload, setSelectedPayload] = useState<any>(null);
+    const [selectedPayload, setSelectedPayload] = useState<AgentMessage | null>(null);
 
-    const fetchLogs = async () => {
+    const fetchLogs = useCallback(async () => {
         try {
             const url = sessionId ? `/api/admin/logs?sessionId=${sessionId}` : '/api/admin/logs';
             const res = await fetch(url);
@@ -99,18 +117,23 @@ export default function AgentFlowVisualizer({ sessionId }: { sessionId?: string 
                 const data = await res.json();
                 setLogs(data.logs);
             }
-        } catch (e) {
-            console.error('Failed to fetch admin logs', e);
+        } catch (error) {
+            console.error('Failed to fetch admin logs', error);
         }
-    };
-
-    useEffect(() => {
-        fetchLogs();
-        const interval = setInterval(fetchLogs, 3000);
-        return () => clearInterval(interval);
     }, [sessionId]);
 
-    const { nodes, edges, laneLabels } = useMemo(() => {
+    useEffect(() => {
+        const timeoutId = window.setTimeout(() => {
+            void fetchLogs();
+        }, 0);
+        const interval = setInterval(fetchLogs, 3000);
+        return () => {
+            clearTimeout(timeoutId);
+            clearInterval(interval);
+        };
+    }, [fetchLogs]);
+
+    const { nodes, edges } = useMemo(() => {
         const newNodes: Node[] = [];
         const newEdges: Edge[] = [];
 
@@ -160,11 +183,12 @@ export default function AgentFlowVisualizer({ sessionId }: { sessionId?: string 
             const agentName = getAgentType(log.from);
             const typeLabel = getTypeLabel(log.type);
             let detail = '';
-            if (log.type === 'LLM_TRACE' && log.payload?.durationMs) {
-                detail = `\n⏱ ${log.payload.durationMs}ms`;
-            } else if (log.type === 'PIPELINE_STEP' && log.payload?.message) {
-                const msg = log.payload.message as string;
-                detail = '\n' + (msg.length > 40 ? msg.substring(0, 40) + '…' : msg);
+            const durationMs = getPayloadDuration(log.payload);
+            const payloadMessage = getPayloadMessage(log.payload);
+            if (log.type === 'LLM_TRACE' && durationMs !== null) {
+                detail = `\n⏱ ${durationMs}ms`;
+            } else if (log.type === 'PIPELINE_STEP' && payloadMessage) {
+                detail = '\n' + (payloadMessage.length > 40 ? payloadMessage.substring(0, 40) + '…' : payloadMessage);
             }
 
             // Colors
@@ -269,7 +293,6 @@ export default function AgentFlowVisualizer({ sessionId }: { sessionId?: string 
         return {
             nodes: [...labelNodes, ...newNodes],
             edges: newEdges,
-            laneLabels: [...activeLanes]
         };
     }, [logs]);
 
@@ -346,7 +369,7 @@ export default function AgentFlowVisualizer({ sessionId }: { sessionId?: string 
                     </div>
 
                     <div className="flex-1 font-mono text-[11px]">
-                        {selectedPayload.type === 'LLM_TRACE' ? (
+                        {selectedPayload.type === 'LLM_TRACE' && isLLMTracePayload(selectedPayload.payload) ? (
                             <div className="space-y-4">
                                 <div>
                                     <p className="font-bold text-indigo-300 mb-1 uppercase text-[10px]">Prompt</p>
@@ -355,7 +378,7 @@ export default function AgentFlowVisualizer({ sessionId }: { sessionId?: string 
                                     </pre>
                                 </div>
                                 <div>
-                                    <p className="font-bold text-indigo-300 mb-1 uppercase text-[10px]">Respuesta ({selectedPayload.payload.durationMs}ms)</p>
+                                    <p className="font-bold text-indigo-300 mb-1 uppercase text-[10px]">Respuesta ({selectedPayload.payload.durationMs ?? 0}ms)</p>
                                     <pre className="bg-slate-900 p-3 rounded-lg border border-slate-800 whitespace-pre-wrap text-blue-400 overflow-x-auto shadow-inner leading-relaxed max-h-[300px] overflow-y-auto">
                                         {selectedPayload.payload.response}
                                     </pre>

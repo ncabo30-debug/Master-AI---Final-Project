@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -19,9 +19,14 @@ export class CleanerAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'CLEAN_DATA') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                data: Record<string, unknown>[];
+                profile: ProfileResult;
+                previousErrors?: string[];
+                iteration?: number;
+            });
             this.communicate(message.from, 'DATA_CLEANED', result);
         }
     }
@@ -71,7 +76,7 @@ export class CleanerAgent extends AgentBase {
         const hasRule = (keyword: string) => rules.some(r => r.toLowerCase().includes(keyword));
 
         return data.map(row => {
-            let val = row[colName];
+            const val = row[colName];
             if (val == null || val === '') {
                 row[colName] = null;
                 return row;

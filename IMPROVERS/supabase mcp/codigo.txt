@@ -1,0 +1,18 @@
+https://supabase.com/docs/guides/getting-started/mcp
+
+https://mcp.supabase.com/mcp
+
+Claude:
+claude mcp add --scope project --transport http supabase "https://mcp.supabase.com/mcp"
+
+codex:
+codex mcp add supabase --url https://mcp.supabase.com/mcp
+
+antigravity:
+{
+  "mcpServers": {
+    "supabase": {
+      "serverUrl": "https://mcp.supabase.com/mcp"
+    }
+  }
+}

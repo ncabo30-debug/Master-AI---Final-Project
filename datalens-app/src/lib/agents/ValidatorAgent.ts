@@ -1,5 +1,5 @@
 import vm from 'node:vm';
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -11,9 +11,12 @@ export class ValidatorAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'VALIDATE_CODE') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                code: string;
+                data: Record<string, unknown>[];
+            });
             this.communicate(message.from, 'CODE_VALIDATED', result);
         }
     }
@@ -21,7 +24,15 @@ export class ValidatorAgent extends AgentBase {
     public async execute(context: { code: string; data: Record<string, unknown>[] }): Promise<ValidatorResult> {
         const { code, data } = context;
         try {
-            const sandbox = { data, globalThis: {} as any, console: { log: () => { } } }; // Protect console
+            const sandbox: {
+                data: Record<string, unknown>[];
+                globalThis: { result?: ValidatorResult['reportConfig'] };
+                console: { log: () => void };
+            } = {
+                data,
+                globalThis: {},
+                console: { log: () => { } }
+            };
             vm.createContext(sandbox);
             vm.runInContext(code, sandbox, { timeout: 3000 }); // Strict 3s timeout for loops
 
@@ -30,9 +41,10 @@ export class ValidatorAgent extends AgentBase {
             }
 
             return { valid: true, reportConfig: sandbox.globalThis.result };
-        } catch (error: any) {
-            AgentLogger.error(this.id, `Validator VM Error: ${error.message}`);
-            return { valid: false, error: error.message };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            AgentLogger.error(this.id, `Validator VM Error: ${message}`);
+            return { valid: false, error: message };
         }
     }
 }

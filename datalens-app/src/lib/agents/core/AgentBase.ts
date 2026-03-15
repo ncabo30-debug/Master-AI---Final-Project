@@ -41,7 +41,7 @@ export abstract class AgentBase {
     /**
      * Helper to send messages over the bus
      */
-    protected communicate(to: string, messageType: string, payload: any) {
+    protected communicate(to: string, messageType: string, payload: unknown) {
         AgentLogger.logCommunication(this.id, to, messageType);
         this.bus.publish({
             from: this.id,

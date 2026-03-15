@@ -2,16 +2,40 @@
 
 import React, { useCallback, useState } from 'react';
 import Papa from 'papaparse';
-import { UploadCloud, FileType } from 'lucide-react';
 
 interface FileUploaderProps {
-    onDataLoaded: (data: any[]) => void;
+    onDataLoaded: (data: Record<string, unknown>[]) => void;
     isLoading: boolean;
 }
 
 export default function FileUploader({ onDataLoaded, isLoading }: FileUploaderProps) {
     const [dragActive, setDragActive] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const processFile = useCallback((file: File) => {
+        setError(null);
+        if (!file.name.endsWith('.csv')) {
+            setError('Por favor, selecciona un archivo CSV.');
+            return;
+        }
+
+        Papa.parse<Record<string, unknown>>(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                if (results.errors.length > 0) {
+                    console.warn(`PapaParse encontró ${results.errors.length} advertencias/errores:`, results.errors.slice(0, 5));
+                    if (results.data.length === 0) {
+                        setError('No se pudo leer el archivo. Asegúrate de que tenga un formato CSV válido.');
+                        return;
+                    }
+                }
+
+                setError(null);
+                onDataLoaded(results.data);
+            }
+        });
+    }, [onDataLoaded]);
 
     const handleDrag = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -31,41 +55,13 @@ export default function FileUploader({ onDataLoaded, isLoading }: FileUploaderPr
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
             processFile(e.dataTransfer.files[0]);
         }
-    }, []);
+    }, [processFile]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         e.preventDefault();
         if (e.target.files && e.target.files[0]) {
             processFile(e.target.files[0]);
         }
-    };
-
-    const processFile = (file: File) => {
-        setError(null);
-        if (!file.name.endsWith('.csv')) {
-            setError('Por favor, selecciona un archivo CSV.');
-            return;
-        }
-
-        Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => {
-                // PapaParse genera errores no fatales (ej. filas con distinto número de campos)
-                if (results.errors.length > 0) {
-                    console.warn(`PapaParse encontró ${results.errors.length} advertencias/errores:`, results.errors.slice(0, 5));
-                    // Si no se pudo extraer ningún dato válido, fallamos
-                    if (results.data.length === 0) {
-                        setError('No se pudo leer el archivo. Asegúrate de que tenga un formato CSV válido.');
-                        return;
-                    }
-                }
-
-                // Limpiamos errores previos y cargamos la data (incluso si hay algunas filas rotas)
-                setError(null);
-                onDataLoaded(results.data);
-            }
-        });
     };
 
     return (

@@ -1,8 +1,8 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
-import { LLMService, LLM_TIMEOUT_MS } from './core/LLMService';
+import { LLMService } from './core/LLMService';
 import type { AnalysisResult } from './types';
 
 /**
@@ -18,9 +18,12 @@ export class AnalystAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'GENERATE_ANALYSIS') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                summaries: Record<string, string>;
+                previousFeedback?: string;
+            });
             this.communicate(message.from, 'ANALYSIS_GENERATED', result);
         }
     }

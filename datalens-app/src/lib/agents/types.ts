@@ -20,6 +20,24 @@ export interface EnrichedSchemaField extends BasicSchemaField {
 /** A schema can be basic (string values) or enriched (object values). */
 export type SchemaMap = Record<string, string | EnrichedSchemaField>;
 
+export type SchemaFieldSource = 'ai' | 'user_override';
+
+export interface SchemaBlueprintColumn {
+    name: string;
+    type: BasicSchemaField['type'];
+    semantic_role: EnrichedSchemaField['semantic_role'];
+    domain: string;
+    analysis_variables: string[];
+    source: SchemaFieldSource;
+}
+
+export interface SchemaBlueprint {
+    sessionId: string;
+    version: number;
+    columns: SchemaBlueprintColumn[];
+    updatedAt: string;
+}
+
 // ── Agent Results ─────────────────────────────────────────
 
 export interface SchemaResult {
@@ -41,7 +59,7 @@ export interface ReportConfig {
     title?: string;
     xAxis?: string;
     yAxis?: string;
-    data: Array<{ name: string; value: number }>;
+    data: Array<{ name: string; value: number }> | Record<string, unknown>[];
     message?: string;
 }
 
@@ -149,6 +167,22 @@ export interface OutlierColumnReport {
 
 export interface OutlierReport {
     outliers: OutlierColumnReport[];
+}
+
+export type DataAnomalySeverity = 'warning' | 'error';
+export type DataAnomalyKind = 'outlier' | 'duplicate' | 'validation' | 'integrity';
+export type DataAnomalySource = 'local_outlier_detector' | 'supabase' | 'manual_review';
+
+export interface DataAnomaly {
+    id: string;
+    kind: DataAnomalyKind;
+    source: DataAnomalySource;
+    severity: DataAnomalySeverity;
+    column: string;
+    rowIndex?: number;
+    value?: string | number | null;
+    message: string;
+    metadata?: Record<string, unknown>;
 }
 
 // ── M6: Viz Feasibility ──────────────────────────────────

@@ -1,4 +1,4 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -11,9 +11,9 @@ export class SchemaAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'ANALYZE_SCHEMA') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as { data: Record<string, unknown>[] });
             this.communicate(message.from, 'SCHEMA_ANALYZED', result);
         }
     }
@@ -81,8 +81,9 @@ IMPORTANTE: RESPONDE ÚNICA Y EXCLUSIVAMENTE CON EL OBJETO JSON PURO. NO uses bl
 
             const parsed = JSON.parse(cleanContent) as SchemaMap;
             return parsed;
-        } catch (e) {
-            throw new Error(`Error parsing LLM schema JSON: ${e}. Content: ${rawResponse.substring(0, 300)}`);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error parsing LLM schema JSON: ${message}. Content: ${rawResponse.substring(0, 300)}`);
         }
     }
 

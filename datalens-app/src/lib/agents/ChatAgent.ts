@@ -1,4 +1,4 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -22,9 +22,13 @@ export class ChatAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'ANSWER_CHAT_QUESTION') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                schema: SchemaMap;
+                question: string;
+                data?: Record<string, unknown>[];
+            });
             this.communicate(message.from, 'CHAT_ANSWERED', result);
         }
     }
@@ -64,9 +68,10 @@ Responde basándote en lo que sabes del esquema. No inventes datos numéricos.`;
             // Path A: Generate and execute SQL
             return await this.executeWithSQL(schema, question, data);
 
-        } catch (error: any) {
-            AgentLogger.error(this.id, `ChatAgent Error: ${error.message}`);
-            return { answer: `No pude procesar tu pregunta: ${error.message}` };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            AgentLogger.error(this.id, `ChatAgent Error: ${message}`);
+            return { answer: `No pude procesar tu pregunta: ${message}` };
         }
     }
 
@@ -133,11 +138,12 @@ Formatea tu respuesta de manera clara:
             const answer = await LLMService.callRaw(answerPrompt, this.id, 'pro');
             return { answer, sql, queryResult: queryResult.slice(0, 50) };
 
-        } catch (sqlError: any) {
+        } catch (sqlError: unknown) {
+            const message = sqlError instanceof Error ? sqlError.message : String(sqlError);
             // Retry once with the error context
             if (!previousError) {
-                AgentLogger.error(this.id, `SQL failed, retrying: ${sqlError.message}`);
-                return this.executeWithSQL(schema, question, data, sqlError.message);
+                AgentLogger.error(this.id, `SQL failed, retrying: ${message}`);
+                return this.executeWithSQL(schema, question, data, message);
             }
 
             // Second failure — give up gracefully

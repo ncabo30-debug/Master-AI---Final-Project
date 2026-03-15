@@ -2,21 +2,11 @@
 
 import React, { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import type { ReportConfig } from '@/lib/agents/types';
 
 interface ReportDataPoint {
     name: string;
     value: number;
-}
-
-interface DashboardProps {
-    reportConfig: {
-        type?: string;
-        title?: string;
-        xAxis?: string;
-        yAxis?: string;
-        data: ReportDataPoint[];
-        message?: string;
-    };
 }
 
 function exportCSV(data: ReportDataPoint[], title: string) {
@@ -32,7 +22,7 @@ function exportCSV(data: ReportDataPoint[], title: string) {
     URL.revokeObjectURL(url);
 }
 
-function generateInsight(data: ReportDataPoint[], title: string): string {
+function generateInsight(data: ReportDataPoint[]): string {
     if (!data || data.length === 0) return 'No hay datos suficientes para generar un insight.';
 
     // Filter out malformed entries
@@ -56,11 +46,9 @@ function generateInsight(data: ReportDataPoint[], title: string): string {
         + `La diferencia entre líder y último es de ${new Intl.NumberFormat('es').format(max - min)}.`;
 }
 
-export default function DashboardContent({ reportConfig }: DashboardProps) {
-    if (!reportConfig) return null;
-
-    // Sanitize data: ensure name is string and value is number
+export default function DashboardContent({ reportConfig }: { reportConfig: ReportConfig }) {
     const sanitizedData = useMemo(() => {
+        if (!reportConfig) return [];
         if (!reportConfig.data || !Array.isArray(reportConfig.data)) return [];
         return reportConfig.data
             .map(d => {
@@ -72,12 +60,14 @@ export default function DashboardContent({ reportConfig }: DashboardProps) {
                 return { name, value };
             })
             .filter((d): d is ReportDataPoint => d !== null && d.name !== '');
-    }, [reportConfig.data]);
+    }, [reportConfig]);
 
     const insight = useMemo(
-        () => generateInsight(sanitizedData, reportConfig.title || 'Reporte'),
-        [sanitizedData, reportConfig.title]
+        () => generateInsight(sanitizedData),
+        [sanitizedData]
     );
+
+    if (!reportConfig) return null;
 
     // Custom tooltip formatter to avoid rendering objects
     const tooltipFormatter = (value: unknown) => {

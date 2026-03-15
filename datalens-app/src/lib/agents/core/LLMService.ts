@@ -29,7 +29,7 @@ export class LLMService {
     }
 
     private static extractJSON(content: string): string {
-        let cleaned = content
+        const cleaned = content
             .replace(/```json/gi, '')
             .replace(/```javascript/gi, '')
             .replace(/```js/gi, '')
@@ -96,7 +96,9 @@ export class LLMService {
                 const inputTokens = usage?.promptTokenCount ?? 0;
                 // Gemini 2.5 thinking models separate thinking tokens from candidate tokens
                 const candidateTokens = usage?.candidatesTokenCount ?? 0;
-                const thinkingTokens = (usage as any)?.thoughtsTokenCount ?? 0;
+                const thinkingTokens = 'thoughtsTokenCount' in (usage ?? {})
+                    ? Number((usage as unknown as Record<string, unknown>).thoughtsTokenCount ?? 0)
+                    : 0;
                 const outputTokens = candidateTokens + thinkingTokens;
 
                 if (inputTokens > 0 || outputTokens > 0) {
@@ -112,7 +114,7 @@ export class LLMService {
 
                 AgentLogger.logLLMCall(agentId, prompt, content, Date.now() - startTime);
                 return content;
-            } catch (err: any) {
+            } catch (err: unknown) {
                 lastError = err instanceof Error ? err : new Error(String(err));
 
                 // Do not retry on 4xx Authentication/Permission errors

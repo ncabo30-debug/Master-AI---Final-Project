@@ -1,4 +1,4 @@
-import { AgentBus } from './core/AgentBus';
+import { AgentBus, type AgentMessage } from './core/AgentBus';
 import { AgentBase } from './core/AgentBase';
 import { AgentRegistry } from './core/AgentRegistry';
 import { AgentLogger } from './core/AgentLogger';
@@ -14,9 +14,12 @@ export class IntegrityAuditorAgent extends AgentBase {
         AgentRegistry.register(this);
     }
 
-    protected async handleMessage(message: any): Promise<void> {
+    protected async handleMessage(message: AgentMessage): Promise<void> {
         if (message.type === 'AUDIT_INTEGRITY') {
-            const result = await this.execute(message.payload);
+            const result = await this.execute(message.payload as {
+                rawData: Record<string, unknown>[];
+                cleanedData: Record<string, unknown>[];
+            });
             this.communicate(message.from, 'INTEGRITY_AUDITED', result);
         }
     }

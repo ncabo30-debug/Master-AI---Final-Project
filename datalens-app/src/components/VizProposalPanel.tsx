@@ -1,24 +1,34 @@
 'use client';
-import { useState } from 'react';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VizProposal } from '@/lib/agents/types';
 
 interface VizProposalPanelProps {
     sessionId: string;
     proposals: VizProposal[] | null;
-    schema: any;
+    schema: unknown;
     onProposalsLoaded: (proposals: VizProposal[]) => void;
     onVizChosen: (viz: VizProposal) => void;
 }
 
-const MAX_FEASIBILITY_RETRIES = 2; // M6: límite de intentos de factibilidad
+const MAX_FEASIBILITY_RETRIES = 2;
 
 const CHART_ICONS: Record<string, string> = {
-    bar: 'bar_chart', line: 'show_chart', scatter: 'scatter_plot',
-    pie: 'pie_chart', area: 'area_chart', heatmap: 'grid_on',
+    bar: 'bar_chart',
+    line: 'show_chart',
+    scatter: 'scatter_plot',
+    pie: 'pie_chart',
+    area: 'area_chart',
+    heatmap: 'grid_on',
 };
+
 const CHART_COLORS: Record<string, string> = {
-    bar: '#6366f1', line: '#10b981', scatter: '#f59e0b',
-    pie: '#ec4899', area: '#3b82f6', heatmap: '#ef4444',
+    bar: '#6366f1',
+    line: '#10b981',
+    scatter: '#f59e0b',
+    pie: '#ec4899',
+    area: '#3b82f6',
+    heatmap: '#ef4444',
 };
 
 export default function VizProposalPanel({ sessionId, proposals, schema, onProposalsLoaded, onVizChosen }: VizProposalPanelProps) {
@@ -28,9 +38,19 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
     const [currentProposals, setCurrentProposals] = useState<VizProposal[] | null>(proposals);
     const [feasibilityIssues, setFeasibilityIssues] = useState<string[]>([]);
     const [feasibilityRetries, setFeasibilityRetries] = useState(0);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const autoLoadedSessionRef = useRef<string | null>(null);
 
-    const loadProposals = async () => {
+    void schema;
+
+    useEffect(() => {
+        setCurrentProposals(proposals);
+    }, [proposals]);
+
+    const loadProposals = useCallback(async (isAuto = false) => {
         setIsLoading(true);
+        setLoadError(null);
+
         try {
             const res = await fetch('/api/analyze', {
                 method: 'POST',
@@ -39,20 +59,29 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
             });
             const result = await res.json();
             if (!res.ok) throw new Error(result.error);
+
             setCurrentProposals(result.proposals);
             onProposalsLoaded(result.proposals);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            alert('Error generando propuestas de visualización.');
+            if (isAuto) {
+                setLoadError('No se pudieron generar las propuestas automaticamente. Reintenta manualmente.');
+            } else {
+                alert('Error generando propuestas de visualizacion.');
+            }
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [onProposalsLoaded, sessionId]);
 
-    // Auto-load proposals
-    if (!currentProposals && !isLoading) {
-        loadProposals();
-    }
+    useEffect(() => {
+        if (!sessionId || currentProposals || autoLoadedSessionRef.current === sessionId) {
+            return;
+        }
+
+        autoLoadedSessionRef.current = sessionId;
+        void loadProposals(true);
+    }, [currentProposals, loadProposals, sessionId]);
 
     const handleSelect = async (viz: VizProposal) => {
         setSelectedId(viz.id);
@@ -60,7 +89,6 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
         setIsValidating(true);
 
         try {
-            // M6: Validate feasibility before proceeding
             const res = await fetch('/api/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -69,22 +97,18 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
             const result = await res.json();
 
             if (result.feasible) {
-                // Factible → proceder al dashboard
                 onVizChosen(viz);
             } else {
-                // No factible → mostrar issues
                 const retryCount = feasibilityRetries + 1;
                 setFeasibilityRetries(retryCount);
-                setFeasibilityIssues(result.issues || ['Visualización no factible.']);
+                setFeasibilityIssues(result.issues || ['Visualizacion no factible.']);
 
-                // M6: Si se supera el límite de reintentos, proceder de todas formas
                 if (retryCount >= MAX_FEASIBILITY_RETRIES) {
-                    setFeasibilityIssues(prev => [...prev, '⚠️ Máximo de reintentos alcanzado. Puedes proceder de todas formas.']);
+                    setFeasibilityIssues((prev) => [...prev, 'Maximo de reintentos alcanzado. Puedes proceder de todas formas.']);
                 }
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            // Si falla la validación, proceder de todas formas
             onVizChosen(viz);
         } finally {
             setIsValidating(false);
@@ -92,7 +116,7 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
     };
 
     const forceSelect = () => {
-        const viz = currentProposals?.find(p => p.id === selectedId);
+        const viz = currentProposals?.find((p) => p.id === selectedId);
         if (viz) onVizChosen(viz);
     };
 
@@ -103,11 +127,34 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                 display: 'flex', alignItems: 'center', gap: '8px'
             }}>
                 <span className="material-symbols-rounded" style={{ color: '#3b82f6' }}>dashboard_customize</span>
-                Propuestas de Visualización
+                Propuestas de Visualizacion
             </h2>
             <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '24px' }}>
-                El experto en visualización propone 3 combinaciones. Elige la que mejor represente tus datos.
+                El experto en visualizacion propone 3 combinaciones. Elige la que mejor represente tus datos.
             </p>
+
+            <div
+                style={{
+                    marginBottom: '20px',
+                    background: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.22)',
+                    borderRadius: '12px',
+                    padding: '16px 18px'
+                }}
+            >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                    <span className="material-symbols-rounded" style={{ color: '#fbbf24', fontSize: '20px' }}>pending_actions</span>
+                    <div>
+                        <h3 style={{ color: '#fde68a', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>
+                            Punto pendiente: configuracion de agrupacion
+                        </h3>
+                        <p style={{ color: '#cbd5e1', fontSize: '13px', lineHeight: 1.5, margin: 0 }}>
+                            La antigua seleccion temprana de dimensiones se movio fuera de la validacion de schema.
+                            Esta es la etapa donde luego conectaremos esa preferencia para influir en la visualizacion elegida.
+                        </p>
+                    </div>
+                </div>
+            </div>
 
             {isLoading ? (
                 <div style={{
@@ -129,7 +176,7 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
             ) : currentProposals ? (
                 <>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
-                        {currentProposals.map(viz => {
+                        {currentProposals.map((viz) => {
                             const isSelected = selectedId === viz.id;
                             const color = CHART_COLORS[viz.chartType] || '#6366f1';
                             return (
@@ -145,7 +192,8 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                                             ? `2px solid ${color}`
                                             : '1px solid rgba(148, 163, 184, 0.1)',
                                         borderRadius: '14px',
-                                        padding: '24px', textAlign: 'left',
+                                        padding: '24px',
+                                        textAlign: 'left',
                                         cursor: isValidating ? 'wait' : 'pointer',
                                         transition: 'all 0.2s ease',
                                         opacity: isValidating && !isSelected ? 0.5 : 1
@@ -168,8 +216,8 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                                         {viz.description}
                                     </p>
                                     <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                        <span>📊 {viz.chartType.toUpperCase()}</span>
-                                        <span>X: {viz.xAxis} → Y: {viz.yAxis}</span>
+                                        <span>Grafico: {viz.chartType.toUpperCase()}</span>
+                                        <span>X: {viz.xAxis} to Y: {viz.yAxis}</span>
                                         {viz.groupBy && <span>Agrupar: {viz.groupBy}</span>}
                                         {viz.filters && viz.filters.length > 0 && <span>Filtros: {viz.filters.join(', ')}</span>}
                                     </div>
@@ -181,7 +229,7 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                                     )}
                                     {isSelected && !isValidating && feasibilityIssues.length === 0 && (
                                         <div style={{ marginTop: '12px', background: color, color: 'white', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', fontWeight: 600, textAlign: 'center' }}>
-                                            ✓ Seleccionado
+                                            Seleccionado
                                         </div>
                                     )}
                                 </button>
@@ -189,7 +237,6 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                         })}
                     </div>
 
-                    {/* M6: Issues de factibilidad */}
                     {feasibilityIssues.length > 0 && (
                         <div style={{
                             marginTop: '16px',
@@ -200,7 +247,7 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                         }}>
                             <h4 style={{ color: '#fbbf24', fontSize: '14px', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <span className="material-symbols-rounded" style={{ fontSize: '18px' }}>warning</span>
-                                Visualización no factible ({feasibilityRetries}/{MAX_FEASIBILITY_RETRIES})
+                                Visualizacion no factible ({feasibilityRetries}/{MAX_FEASIBILITY_RETRIES})
                             </h4>
                             <ul style={{ padding: '0 0 0 16px', marginBottom: '12px' }}>
                                 {feasibilityIssues.map((issue, i) => (
@@ -208,7 +255,7 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                                 ))}
                             </ul>
                             <p style={{ color: '#64748b', fontSize: '12px', marginBottom: '12px' }}>
-                                Elige otra visualización o procede con la actual.
+                                Elige otra visualizacion o procede con la actual.
                             </p>
 
                             {feasibilityRetries >= MAX_FEASIBILITY_RETRIES && (
@@ -221,13 +268,26 @@ export default function VizProposalPanel({ sessionId, proposals, schema, onPropo
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    Proceder de todas formas →
+                                    Proceder de todas formas
                                 </button>
                             )}
                         </div>
                     )}
                 </>
-            ) : null}
+            ) : (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-5 dark:border-red-500/30 dark:bg-red-500/10">
+                    <p className="text-sm text-red-700 dark:text-red-300">
+                        {loadError || 'No se encontraron propuestas de visualizacion para esta sesion.'}
+                    </p>
+                    <button
+                        onClick={() => loadProposals(false)}
+                        className="mt-4 inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-white dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10"
+                    >
+                        <span className="material-symbols-rounded text-base">refresh</span>
+                        Reintentar propuestas
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

@@ -49,7 +49,7 @@ export default function TokenUsageWidget({ sessionId }: { sessionId?: string | n
     return (
         <div className="p-4 border-t border-slate-200 dark:border-border-dark">
             <div className="flex items-center gap-2 mb-3">
-                <span className="material-symbols-outlined text-sm text-amber-500" style={{ fontVariationSettings: "'FILL' 1" }}>token</span>
+                <span className="material-symbols-outlined text-sm text-amber-500" style={{ fontVariationSettings: "'FILL' 1" }}>toll</span>
                 <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Consumo IA</span>
             </div>
 

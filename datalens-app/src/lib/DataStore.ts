@@ -1,13 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { ProfileResult, VizProposal, FileInspectionResult, DuplicateReport, OutlierReport, SchemaMap, QuestionOption } from './agents/types';
+import type { ProfileResult, VizProposal, FileInspectionResult, DuplicateReport, OutlierReport, SchemaMap, QuestionOption, SchemaBlueprint } from './agents/types';
 
 interface StoredSession {
     data: Record<string, unknown>[];
     excelBufferBase64?: string;
     profile?: ProfileResult;
     schema?: SchemaMap;
+    schemaBlueprint?: SchemaBlueprint;
     questions?: QuestionOption[];
     analysis?: string;
     vizProposals?: VizProposal[];
@@ -61,6 +62,7 @@ export function storeData(sessionId: string, data: Record<string, unknown>[]): s
         excelBufferBase64: existing?.excelBufferBase64,
         profile: existing?.profile,
         schema: existing?.schema,
+        schemaBlueprint: existing?.schemaBlueprint,
         questions: existing?.questions,
         ts: Date.now()
     });
@@ -105,6 +107,10 @@ export function getProfile(sessionId: string): ProfileResult | null {
 
 export function getSchema(sessionId: string): SchemaMap | null {
     return readSession(sessionId)?.schema || null;
+}
+
+export function getSchemaBlueprint(sessionId: string): SchemaBlueprint | null {
+    return readSession(sessionId)?.schemaBlueprint || null;
 }
 
 export function clearData(sessionId: string): void {

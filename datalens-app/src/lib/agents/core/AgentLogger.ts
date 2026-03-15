@@ -1,4 +1,7 @@
-import { AgentBus, AgentMessage } from './AgentBus';
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return String(error);
+}
 
 export class AgentLogger {
     public static logCommunication(from: string, to: string, type: string) {
@@ -12,9 +15,6 @@ export class AgentLogger {
     public static logStep(agentId: string, message: string, sessionId?: string) {
         console.log(`[AgentLogger] STEP [${agentId}]: ${message}`);
         if (sessionId) {
-            const history = AgentBus.getSessionHistory(sessionId);
-            // getSessionHistory returns the live reference if session exists
-            // but we need to ensure the session exists first
             if (!globalThis.agentSessionHistories?.has(sessionId)) {
                 globalThis.agentSessionHistories?.set(sessionId, []);
             }
@@ -29,7 +29,7 @@ export class AgentLogger {
         }
     }
 
-    public static error(agentId: string, error: any, sessionId?: string) {
+    public static error(agentId: string, error: unknown, sessionId?: string) {
         console.error(`[AgentLogger] ERR [${agentId}]:`, error);
 
         if (sessionId) {
@@ -42,7 +42,7 @@ export class AgentLogger {
                 from: agentId,
                 to: 'system',
                 type: 'AGENT_ERROR',
-                payload: { error: error.message || error }
+                payload: { error: getErrorMessage(error) }
             });
         }
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentMessage } from '@/lib/agents/core/AgentBus';
 
 export default function AgentTerminal({ sessionId }: { sessionId?: string | null }) {
@@ -8,7 +8,7 @@ export default function AgentTerminal({ sessionId }: { sessionId?: string | null
     const [autoScroll, setAutoScroll] = useState(true);
     const endOfLogsRef = useRef<HTMLDivElement>(null);
 
-    const fetchLogs = async () => {
+    const fetchLogs = useCallback(async () => {
         try {
             const url = sessionId ? `/api/admin/logs?sessionId=${sessionId}` : '/api/admin/logs';
             const res = await fetch(url);
@@ -19,14 +19,18 @@ export default function AgentTerminal({ sessionId }: { sessionId?: string | null
         } catch (e) {
             console.error('Failed to fetch admin logs', e);
         }
-    };
+    }, [sessionId]);
 
     useEffect(() => {
-        // Poll every 2 seconds
-        fetchLogs();
+        const timeoutId = window.setTimeout(() => {
+            void fetchLogs();
+        }, 0);
         const interval = setInterval(fetchLogs, 2000);
-        return () => clearInterval(interval);
-    }, [sessionId]);
+        return () => {
+            clearTimeout(timeoutId);
+            clearInterval(interval);
+        };
+    }, [fetchLogs]);
 
     useEffect(() => {
         if (autoScroll && endOfLogsRef.current) {

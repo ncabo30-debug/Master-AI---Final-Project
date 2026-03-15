@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import type { SchemaMap, EnrichedSchemaField } from '@/lib/agents/types';
+import React, { useState, useCallback, useMemo } from 'react';
+import type { SchemaMap, EnrichedSchemaField, DataAnomaly } from '@/lib/agents/types';
 
 type SemanticRole = 'metric' | 'dimension' | 'timeline' | 'id';
 
 interface InteractiveSheetProps {
     data: Record<string, unknown>[];
     schema?: SchemaMap;
+    anomalies?: DataAnomaly[];
     onSchemaOverride?: (col: string, newRole: SemanticRole) => void;
 }
 
@@ -23,14 +24,14 @@ const ROLE_COLORS: Record<string, string> = {
 
 const ROLES: SemanticRole[] = ['metric', 'dimension', 'timeline', 'id'];
 
-export default function InteractiveSheet({ data, schema, onSchemaOverride }: InteractiveSheetProps) {
+function buildCellAnomalyKey(rowIndex: number, column: string) {
+    return `${rowIndex}:${column}`;
+}
+
+export default function InteractiveSheet({ data, schema, anomalies = [], onSchemaOverride }: InteractiveSheetProps) {
     const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
     const [editingCol, setEditingCol] = useState<string | null>(null);
     const [overrides, setOverrides] = useState<Record<string, SemanticRole>>({});
-
-    if (!data || data.length === 0) return null;
-
-    const columns = Object.keys(data[0]);
 
     const getEffectiveRole = (col: string): string => {
         if (overrides[col]) return overrides[col];
@@ -59,6 +60,30 @@ export default function InteractiveSheet({ data, schema, onSchemaOverride }: Int
         onSchemaOverride?.(col, newRole);
     }, [onSchemaOverride]);
 
+    const anomalyIndex = useMemo(() => {
+        const byCell = new Map<string, DataAnomaly[]>();
+        const byColumn = new Map<string, DataAnomaly[]>();
+
+        anomalies.forEach((anomaly) => {
+            const columnAnomalies = byColumn.get(anomaly.column) || [];
+            columnAnomalies.push(anomaly);
+            byColumn.set(anomaly.column, columnAnomalies);
+
+            if (typeof anomaly.rowIndex === 'number') {
+                const key = buildCellAnomalyKey(anomaly.rowIndex, anomaly.column);
+                const cellAnomalies = byCell.get(key) || [];
+                cellAnomalies.push(anomaly);
+                byCell.set(key, cellAnomalies);
+            }
+        });
+
+        return { byCell, byColumn };
+    }, [anomalies]);
+
+    if (!data || data.length === 0) return null;
+
+    const columns = Object.keys(data[0]);
+
     return (
         <div className="flex flex-col gap-3 h-full animate-fade-in delay-100 relative">
             <div className="flex items-center justify-between">
@@ -72,6 +97,7 @@ export default function InteractiveSheet({ data, schema, onSchemaOverride }: Int
                     <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Fechas</span>
                     <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-500"></div> Dimensiones</span>
                     <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-slate-500"></div> IDs</span>
+                    {anomalies.length > 0 && <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-300"><div className="w-2 h-2 rounded-full bg-amber-400"></div> Anomalías</span>}
                 </div>
             </div>
 
@@ -85,6 +111,7 @@ export default function InteractiveSheet({ data, schema, onSchemaOverride }: Int
                                     const aiDef = getInterpretation(col);
                                     const isConfirmed = confirmed[col];
                                     const effectiveRole = getEffectiveRole(col);
+                                    const columnAnomalies = anomalyIndex.byColumn.get(col) || [];
 
                                     return (
                                         <th key={col + i} className="px-4 py-3 border-r justify-between items-start border-slate-100 dark:border-slate-800/50 last:border-r-0 min-w-[200px]"
@@ -141,6 +168,15 @@ export default function InteractiveSheet({ data, schema, onSchemaOverride }: Int
                                                 ) : schema && editingCol !== col ? (
                                                     <span className="opacity-60 font-mono lowercase text-[9px]">{typeof schema[col] === 'string' ? (schema[col] as string) : 'unknown'}</span>
                                                 ) : null}
+                                                {columnAnomalies.length > 0 && (
+                                                    <span
+                                                        className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300 mt-1"
+                                                        title={columnAnomalies[0]?.message}
+                                                    >
+                                                        <span className="material-symbols-outlined text-[11px]">warning</span>
+                                                        {columnAnomalies.length} alerta{columnAnomalies.length > 1 ? 's' : ''}
+                                                    </span>
+                                                )}
                                             </div>
                                         </th>
                                     );
@@ -150,11 +186,26 @@ export default function InteractiveSheet({ data, schema, onSchemaOverride }: Int
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                             {data.slice(0, 50).map((row, i) => (
                                 <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                                    {columns.map((col, j) => (
-                                        <td key={j} className="px-4 py-2 text-xs border-r border-slate-100 dark:border-slate-800/50 last:border-r-0 text-slate-600 dark:text-slate-300 font-medium whitespace-nowrap max-w-[200px] truncate" title={String(row[col])}>
-                                            {String(row[col] ?? '')}
-                                        </td>
-                                    ))}
+                                    {columns.map((col, j) => {
+                                        const cellAnomalies = anomalyIndex.byCell.get(buildCellAnomalyKey(i, col)) || [];
+                                        const hasAnomaly = cellAnomalies.length > 0;
+                                        const anomalyMessage = hasAnomaly ? cellAnomalies.map(a => a.message).join(' | ') : '';
+
+                                        return (
+                                            <td
+                                                key={j}
+                                                className={`px-4 py-2 text-xs border-r border-slate-100 dark:border-slate-800/50 last:border-r-0 text-slate-600 dark:text-slate-300 font-medium whitespace-nowrap max-w-[200px] truncate ${hasAnomaly ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-100 shadow-inner' : ''}`}
+                                                title={hasAnomaly ? `${String(row[col] ?? '')}\n${anomalyMessage}` : String(row[col] ?? '')}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    {hasAnomaly && (
+                                                        <span className="material-symbols-outlined text-[12px] text-amber-600 dark:text-amber-300 shrink-0">warning</span>
+                                                    )}
+                                                    <span className="truncate">{String(row[col] ?? '')}</span>
+                                                </div>
+                                            </td>
+                                        );
+                                    })}
                                 </tr>
                             ))}
                         </tbody>
@@ -162,7 +213,7 @@ export default function InteractiveSheet({ data, schema, onSchemaOverride }: Int
                 </div>
 
                 <div className="bg-slate-50 dark:bg-slate-800/30 p-3 flex justify-center border-t border-slate-200 dark:border-slate-800">
-                    <span className="text-xs text-slate-500 italic">Mostrando {Math.min(50, data.length)} filas de {data.length} procesadas</span>
+                    <span className="text-xs text-slate-500 italic">Mostrando {Math.min(50, data.length)} filas de {data.length} procesadas{anomalies.length > 0 ? ` · ${anomalies.length} anomalías locales detectadas` : ''}</span>
                 </div>
             </div>
         </div>

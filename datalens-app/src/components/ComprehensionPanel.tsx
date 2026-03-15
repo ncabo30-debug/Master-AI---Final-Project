@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Send, User, BrainCircuit, Activity } from 'lucide-react';
 import type { SchemaMap, QuestionOption } from '@/lib/agents/types';
 
 interface ComprehensionPanelProps {
@@ -17,6 +16,15 @@ export default function ComprehensionPanel({ schema, questions, onSubmitAnswers,
     const [chatInput, setChatInput] = useState('');
     const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'ai', content: string }[]>([]);
     const [isChatting, setIsChatting] = useState(false);
+
+    const getSchemaType = (key: string) => {
+        const value = schema?.[key];
+        if (typeof value === 'object' && value && 'type' in value) {
+            return typeof value.type === 'string' ? value.type : '';
+        }
+
+        return typeof value === 'string' ? value : '';
+    };
 
     const handleSelectOption = (questionId: string, option: string) => {
         setAnswers(prev => ({ ...prev, [questionId]: option }));
@@ -38,7 +46,7 @@ export default function ComprehensionPanel({ schema, questions, onSubmitAnswers,
         try {
             const reply = await onChatMessage(msg);
             setChatHistory(prev => [...prev, { role: 'ai', content: reply }]);
-        } catch (error) {
+        } catch {
             setChatHistory(prev => [...prev, { role: 'ai', content: "Hubo un error al procesar tu pregunta. Verifica si tu IA local está corriendo o reintenta." }]);
         } finally {
             setIsChatting(false);
@@ -49,18 +57,13 @@ export default function ComprehensionPanel({ schema, questions, onSubmitAnswers,
 
     // Calcular un resumen simple de las columnas (número y algunas categóricas/numéricas)
     const categoricals = schema ? Object.keys(schema).filter(k => {
-        const val = typeof schema[k] === 'object' ? (schema[k] as any).type : schema[k];
+        const val = getSchemaType(k);
         return val === 'categorical' || val === 'boolean' || val === 'string';
     }) : [];
 
     const numerics = schema ? Object.keys(schema).filter(k => {
-        const val = typeof schema[k] === 'object' ? (schema[k] as any).type : schema[k];
+        const val = getSchemaType(k);
         return val === 'number' || val === 'integer' || val === 'float';
-    }) : [];
-
-    const temporals = schema ? Object.keys(schema).filter(k => {
-        const val = typeof schema[k] === 'object' ? (schema[k] as any).type : schema[k];
-        return val === 'date' || val === 'time' || val === 'datetime';
     }) : [];
 
     return (
