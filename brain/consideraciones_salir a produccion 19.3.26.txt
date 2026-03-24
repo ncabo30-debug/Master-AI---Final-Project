@@ -1,0 +1,541 @@
+================================================================================
+  DATALENS AI — CONSIDERACIONES LOCAL vs. PRODUCCIÓN
+  Análisis completo del código | Generado: 2026-03-15
+================================================================================
+
+Este documento detalla todo lo que funciona bien en local/demo pero que necesita
+cambios antes de un deploy a producción real. Organizado por área y prioridad.
+
+
+════════════════════════════════════════════════════════════════════════════════
+  BACKEND
+════════════════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────────────
+[CRITICO] 1. DataStore — almacenamiento en /tmp
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/DataStore.ts
+
+Estado actual:
+  Toda la sesión (datos limpios, Excel, schema, análisis, proposals) se guarda
+  como un único JSON gigante en os.tmpdir() → ej: /tmp/datalens_sessions/session-xxx.json
+
+Por qué está bien en local:
+  En local Next.js corre en un solo proceso persistente. El archivo siempre está
+  disponible entre requests.
+
+Por qué se rompe en producción:
+  - En Vercel (serverless): cada request puede ejecutarse en una instancia distinta.
+    El /tmp no se comparte entre instancias y se resetea frecuentemente.
+    Una request graba el JSON, la siguiente cae en otra instancia → archivo no existe → sesión perdida.
+  - Con múltiples instancias (escalado horizontal): condiciones de carrera al leer/escribir
+    el mismo archivo JSON desde instancias distintas.
+  - El Excel buffer se guarda como base64 dentro del JSON. Un archivo de 50k filas
+    puede pesar 30-50MB. Leer y reescribir ese JSON completo para actualizar
+    solo el campo "analysis" es muy ineficiente.
+
+Solución para producción:
+  Migrar a Supabase (ya en el roadmap del proyecto):
+  - Tabla `sessions` en PostgreSQL para metadata y resultados (schema, analysis, proposals).
+  - Tabla `session_data` para los datos limpios por filas (o guardar como JSONB).
+  - Supabase Storage para el archivo Excel generado y el CSV original.
+  - Solo hay que reescribir DataStore.ts. El resto de la app no cambia porque
+    accede al storage solo a través de las funciones exportadas de ese archivo.
+
+Esfuerzo estimado: 1 día de trabajo.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[CRITICO] 2. TokenTracker — estado en memoria del módulo
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/TokenTracker.ts
+
+Estado actual:
+  El Map `sessionUsage` es una variable de módulo (in-memory). Acumula el uso
+  de tokens y costo estimado por sesión.
+
+Por qué está bien en local:
+  Un solo proceso, la memoria persiste entre requests.
+
+Por qué se rompe en producción:
+  En entornos serverless cada invocación de función es un proceso distinto.
+  El Map se reinicia en cada request → el widget de tokens siempre muestra 0
+  o datos incompletos porque los distintos requests del mismo pipeline caen
+  en instancias distintas.
+
+Solución para producción:
+  Persistir los registros de tokens en la tabla `sessions` de Supabase, o en
+  una tabla propia `token_usage`. La función `record()` haría un INSERT y
+  `getSummary()` haría un SELECT agregado.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[CRITICO] 3. AgentBus y AgentLogger — globalThis como store compartido
+──────────────────────────────────────────────────────────────────────────────
+Archivos: src/lib/agents/core/AgentBus.ts, AgentLogger.ts
+
+Estado actual:
+  Los logs del pipeline y los mensajes entre agentes se almacenan en
+  `globalThis.agentSessionHistories` (un Map global en memoria).
+
+Por qué está bien en local:
+  Un proceso Node.js único. El AdminView puede consultar el historial en tiempo real.
+
+Por qué se rompe en producción:
+  Mismo problema que TokenTracker: en serverless, `globalThis` no se comparte
+  entre instancias. El AdminView puede mostrar logs vacíos o incompletos porque
+  la request GET a /api/admin/logs cae en una instancia distinta a la que ejecutó
+  los agentes.
+
+Solución para producción:
+  - Persistir los logs en Supabase (tabla `agent_logs`).
+  - El AdminView los consulta via API en lugar de globalThis.
+  - Opción más liviana: aceptar que el AdminView es solo una herramienta de debug
+    local y documentarlo como tal. En producción los logs van a consola del servidor.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[CRITICO] 4. Sin autenticación ni rate limiting en la API
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/app/api/analyze/route.ts
+
+Estado actual:
+  El endpoint POST /api/analyze no tiene ningún mecanismo de autenticación.
+  Cualquier persona que conozca la URL puede hacer requests ilimitados.
+
+Por qué está bien en local:
+  Solo vos/tu compañero tienen acceso a localhost.
+
+Por qué se rompe en producción:
+  - Si alguien encuentra la URL del deploy puede hacer miles de requests y agotar
+    toda la cuota de la API de Gemini (que cuesta dinero real).
+  - El endpoint /api/admin/logs tampoco tiene auth → cualquiera podría consultar
+    logs de sesiones si adivina un sessionId.
+
+Solución para producción:
+  Mínimo viable: un simple API key en el header (X-API-Key) validado en la route.
+  Correcto: autenticación con Supabase Auth (JWT) o NextAuth.js.
+  Adicional: rate limiting por IP usando Upstash Rate Limit (se integra en minutos
+  con Vercel) o middleware de Next.js.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 5. Timeout de requests en Vercel
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/app/api/analyze/route.ts (línea: export const maxDuration = 300)
+
+Estado actual:
+  maxDuration está seteado en 300 segundos, que es el límite del plan Pro de Vercel.
+
+Por qué está bien en local:
+  Sin límite de tiempo.
+
+Por qué puede ser un problema en producción:
+  - Plan Hobby de Vercel: límite de 10 segundos. El pipeline completo con Gemini
+    2.5 Pro puede tardar fácilmente 2-3 minutos. Esto crashearía inmediatamente.
+  - Plan Pro de Vercel: 300 segundos. Suficiente para la mayoría de los casos,
+    pero archivos grandes con Gemini 2.5 Pro (thinking model) pueden superarlo.
+  - El pipeline actual es multi-step (clean_data → analyze_schema → generate_analysis
+    → propose_visualizations) así que cada request individual debería ser manejable,
+    pero hay que verificarlo con archivos reales.
+
+Solución para producción:
+  Opción A: Railway o Render en lugar de Vercel → sin límite de tiempo, mismo
+  proceso de deploy (push to GitHub → auto-deploy). Recomendado.
+  Opción B: Vercel Pro con maxDuration=300 y monitorear timeouts.
+  Opción C: Implementar streaming en los endpoints más lentos (Gemini lo soporta).
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 6. Compatibilidad de better-sqlite3 con plataformas serverless
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/SQLiteService.ts
+
+Estado actual:
+  better-sqlite3 es un módulo nativo de Node.js que requiere binarios compilados
+  para la plataforma objetivo. Se usa para ejecutar SQL en memoria para el chat.
+
+Por qué está bien en local:
+  Se compila al hacer npm install en la máquina local.
+
+Por qué puede ser un problema en producción:
+  - Vercel Edge Runtime: no soporta módulos nativos. Hay que asegurarse de usar
+    el Node.js Runtime (no Edge) en la route. Actualmente no está declarado
+    explícitamente en route.ts.
+  - Vercel Serverless Functions con Node.js Runtime: debería funcionar, pero
+    a veces hay problemas con módulos nativos en el build. Requiere prueba.
+  - Railway/Render: funcionará sin problemas (entorno Node.js estándar).
+
+Solución para producción:
+  Agregar al inicio de route.ts:
+    export const runtime = 'nodejs';
+  Esto fuerza el Node.js Runtime y evita que Vercel intente usar Edge Runtime.
+  En Railway/Render no es necesario pero no hace daño.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 7. Validación de tamaño y tipo de payload en la API
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/app/api/analyze/route.ts
+
+Estado actual:
+  body.data se acepta directamente como array sin validar tamaño ni estructura.
+  No hay límite en el número de filas que se pueden enviar.
+
+Por qué está bien en local:
+  Solo vos subís archivos y conocés las limitaciones.
+
+Por qué se rompe en producción:
+  - Un usuario podría subir un CSV con 500k filas, generando un payload HTTP de
+    varios megabytes que Next.js intenta parsear completo en memoria.
+  - Next.js tiene un límite de 4MB por defecto en el body de la request. Si se
+    supera, la request falla con un error críptico.
+  - Sin validación, un array malformado puede crashear agentes en cascada.
+
+Solución para producción:
+  - Agregar validación de tamaño en route.ts (ej: máximo 100k filas o 5MB).
+  - Mejor solución: subir el archivo directamente a Supabase Storage y pasar
+    solo la referencia al backend (elimina el problema del payload grande).
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 8. Modelos y precios de Gemini hardcodeados
+──────────────────────────────────────────────────────────────────────────────
+Archivos: src/lib/agents/core/LLMService.ts, src/lib/TokenTracker.ts
+
+Estado actual:
+  Los nombres de modelos ('gemini-2.5-flash', 'gemini-2.5-pro') y los precios
+  ($0.30/$2.50 Flash, $1.25/$10.00 Pro por 1M tokens) están hardcodeados.
+
+Por qué está bien en local:
+  Para demo no importa.
+
+Por qué puede ser un problema en producción:
+  - Google puede cambiar los nombres de los modelos (ej: gemini-2.5-flash-latest).
+  - Google cambia precios con cierta frecuencia. El widget de costo estimado
+    mostraría valores incorrectos.
+  - Si un modelo queda deprecated, el app crashea con error 404 de la API.
+
+Solución para producción:
+  Mover nombres de modelos y precios a variables de entorno o a un archivo
+  de configuración centralizado (config/models.ts) fácil de actualizar.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[MENOR] 9. console.log masivo en el pipeline
+──────────────────────────────────────────────────────────────────────────────
+
+Estado actual:
+  Hay console.log, console.warn y console.error distribuidos en todos los agentes
+  y en route.ts para tracing del pipeline.
+
+Por qué está bien en local:
+  Muy útil para debugging.
+
+Por qué es un problema en producción:
+  - Los logs polutan la salida del servidor (en Railway/Render se paga por volumen
+    de logs en algunos planes).
+  - Los prompts completos de Gemini se loguean (AgentLogger.logLLMCall), lo que
+    puede incluir datos sensibles del usuario en los logs del servidor.
+  - No hay niveles de log (debug/info/warn/error), así que en producción se ve
+    todo o nada.
+
+Solución para producción:
+  Usar una variable de entorno LOG_LEVEL y wrapper que no loguee en producción
+  los prompts completos. Alternativa: Sentry o Axiom para logs estructurados.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[MENOR] 10. Falta archivo .env.example
+──────────────────────────────────────────────────────────────────────────────
+
+Estado actual:
+  No existe .env.example en el repo. El README.md es el genérico de Next.js
+  y no documenta las variables de entorno necesarias.
+
+Por qué es un problema:
+  Tu compañero (o cualquier nuevo desarrollador) no sabe qué variables de entorno
+  configurar. Actualmente la única documentación es el código fuente.
+
+Solución:
+  Crear datalens-app/.env.example con:
+    GEMINI_API_KEY=your_google_ai_studio_api_key_here
+    # Para producción (Supabase):
+    # SUPABASE_URL=https://xxxx.supabase.co
+    # SUPABASE_ANON_KEY=eyJ...
+    # SUPABASE_SERVICE_ROLE_KEY=eyJ...  (solo backend, nunca exponer al cliente)
+
+
+════════════════════════════════════════════════════════════════════════════════
+  FRONTEND
+════════════════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────────────
+[CRITICO] 11. CSV se parsea en el browser y viaja completo en el body HTTP
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/csvParser.ts, src/lib/useFileQueue.ts
+
+Estado actual:
+  El archivo CSV se parsea con PapaParse directamente en el browser (lado cliente).
+  El resultado (array de objetos JavaScript) se guarda en el estado React del
+  componente y se envía como JSON en el body de cada request a /api/analyze.
+
+Por qué está bien en local:
+  Archivos de demo pequeños, red local sin latencia.
+
+Por qué es un problema en producción:
+  - Para un CSV de 100k filas: ~20-50MB de JSON en el body HTTP de la request.
+    Esto puede superar el límite de Next.js (4MB por defecto) o tardar mucho
+    en transmitirse, especialmente desde conexiones lentas.
+  - Los datos completos viajan en cada request que necesita los datos (aunque
+    la mayoría usa sessionId, la primera llamada manda todo el array).
+  - Si el browser del usuario tiene poca RAM y el CSV es grande, el parseo
+    puede colgar el tab.
+
+Solución para producción:
+  Upload directo del archivo CSV a Supabase Storage. El frontend manda solo
+  el file reference (URL + sessionId). El backend descarga y procesa el CSV
+  directamente del storage, sin que los datos pasen por el browser.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[CRITICO] 12. Toda la data del pipeline vive en estado React (no persiste)
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/useFileQueue.ts, src/lib/fileQueue.ts
+
+Estado actual:
+  Todo el estado del pipeline (rawData, cleanedData, schema, analysis, proposals,
+  reportConfig) vive en un Map de React en memoria del browser.
+  Si el usuario recarga la página o cierra el tab, pierde todo su trabajo.
+
+Por qué está bien para una demo:
+  La demo es guiada, no se espera que el usuario recargue.
+
+Por qué es un problema en producción:
+  - Usuarios reales esperan poder retomar su trabajo.
+  - En mobile o conexiones inestables, un reload involuntario borra todo.
+  - Los datos limpios (cleanedData) pueden ser varios MB en el estado React,
+    lo que impacta el rendimiento del browser.
+
+Solución para producción:
+  Con Supabase ya tienes el sessionId. Podrías:
+  - Guardar el sessionId en localStorage para recovery básico.
+  - Reconstruir el estado del pipeline consultando la sesión en Supabase al
+    cargar la app (recovery completo).
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 13. Google Fonts cargadas desde CDN externo
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/app/layout.tsx
+
+Estado actual:
+  Material Symbols se carga con un <link> a fonts.googleapis.com en el <head>.
+  Inter se carga con next/font/google (que sí las descarga en build time).
+
+Por qué está bien en local:
+  Acceso a internet disponible, latencia imperceptible.
+
+Por qué es un problema en producción:
+  - En entornos corporativos o educativos con restricciones de red, Google Fonts
+    puede estar bloqueado → los íconos de Material Symbols no se muestran y la
+    UI queda sin íconos.
+  - Material Symbols se carga en runtime (no en build time como Inter), agregando
+    latencia al primer render.
+  - Es un Third Party Request que puede afectar métricas de Core Web Vitals (LCP).
+
+Solución para producción:
+  Self-hostear la fuente Material Symbols descargando los archivos woff2 e
+  importándolos con @font-face en globals.css.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 14. Sin validación de tamaño de archivo en el frontend
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/useFileQueue.ts (función enqueueFiles)
+
+Estado actual:
+  Se filtra solo por extensión .csv pero no hay límite de tamaño de archivo.
+  Tampoco hay feedback al usuario si el archivo es demasiado grande.
+
+Por qué está bien en local:
+  Vos sabés qué archivos subir.
+
+Por qué es un problema en producción:
+  Un usuario puede subir un CSV de 200MB, el browser intenta parsearlo con
+  PapaParse, el tab se congela o crashea sin ningún mensaje de error útil.
+
+Solución para producción:
+  Agregar validación antes de parseCSVFile:
+    if (file.size > 50 * 1024 * 1024) { // 50MB límite
+      // mostrar error amigable al usuario
+    }
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 15. Sin Error Boundaries en React
+──────────────────────────────────────────────────────────────────────────────
+
+Estado actual:
+  No hay ningún Error Boundary definido en el árbol de componentes.
+
+Por qué está bien en local:
+  En desarrollo, React muestra el overlay de error de todas formas.
+
+Por qué es un problema en producción:
+  Un error no capturado en cualquier componente (ej: DashboardContent intentando
+  renderizar datos malformados de Gemini) crashea toda la app → pantalla en blanco.
+  El usuario no tiene forma de recuperarse sin recargar (perdiendo todo su trabajo).
+
+Solución para producción:
+  Envolver FileMainArea y DashboardContent en Error Boundaries con UI de fallback
+  que permita al usuario continuar o reintentar sin perder el resto del estado.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[MENOR] 16. URL de la API hardcodeada como relativa
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/useFileQueue.ts (función apiPost)
+
+Estado actual:
+  Todas las calls a la API usan '/api/analyze' (URL relativa).
+
+Por qué está bien en local y en un deploy standard de Next.js:
+  Frontend y backend están en el mismo dominio. La URL relativa funciona.
+
+Por qué podría ser un problema:
+  Si en algún momento separan el frontend (Vercel) del backend (Railway u otro),
+  las calls fallarán. No es un problema inmediato pero vale la pena documentarlo.
+
+Solución si aplica:
+  Usar process.env.NEXT_PUBLIC_API_URL con fallback a ''.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[MENOR] 17. Metadata y SEO básica
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/app/layout.tsx
+
+Estado actual:
+  metadata = { title: "DataLens AI", description: "AI-powered Data Management..." }
+  No hay favicon propio, og:image, ni metadata específica por página.
+
+Por qué está bien en local/demo:
+  No importa.
+
+Por qué importa en producción:
+  Si comparten el link del deploy (para el TFM, por ejemplo), el preview en
+  WhatsApp/LinkedIn no mostrará nada útil. El favicon es el de Next.js.
+
+Solución:
+  Agregar favicon propio y og:image básico en layout.tsx.
+
+
+════════════════════════════════════════════════════════════════════════════════
+  INFRAESTRUCTURA Y DEPLOY
+════════════════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────────────
+[CRITICO] 18. Elección de plataforma de deploy
+──────────────────────────────────────────────────────────────────────────────
+
+Opciones y trade-offs:
+
+  VERCEL (plan Hobby - GRATIS)
+    - Límite de 10 segundos por request → el pipeline crashea. NO viable.
+
+  VERCEL (plan Pro - $20/mes por miembro)
+    - Límite de 300 segundos. Suficiente para la mayoría de los casos.
+    - Problema: better-sqlite3 (módulo nativo) requiere verificación.
+    - Agregar `export const runtime = 'nodejs'` en route.ts es obligatorio.
+    - Para un TFM: probablemente caro/innecesario.
+
+  RAILWAY (plan Hobby - ~$5/mes según uso)
+    - Sin límite de tiempo en requests.
+    - Entorno Node.js estándar → better-sqlite3 funciona sin configuración extra.
+    - Deploy desde GitHub igual de simple que Vercel.
+    - Recomendado para este proyecto.
+
+  RENDER (plan Free o $7/mes)
+    - Similar a Railway. Plan gratuito tiene "spin down" después de 15 min
+      de inactividad (primer request tarda 30-60 segundos en "despertar").
+    - Para demo con audiencia fija: arrancar la instancia manualmente antes
+      de la presentación.
+
+  SELF-HOSTED (VPS en DigitalOcean/Hetzner)
+    - Máximo control, sin límites. Más configuración inicial (Nginx, SSL, PM2).
+    - Para un TFM no vale la complejidad extra.
+
+  RECOMENDACIÓN: Railway para el deploy del TFM.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 19. Variables de entorno en el deploy
+──────────────────────────────────────────────────────────────────────────────
+
+Variables requeridas para levantar la app (hoy):
+  GEMINI_API_KEY=...
+
+Variables adicionales que se necesitarán con Supabase:
+  SUPABASE_URL=...
+  SUPABASE_ANON_KEY=...
+  SUPABASE_SERVICE_ROLE_KEY=...  ← NUNCA exponer al cliente (NEXT_PUBLIC_)
+
+Consideración importante:
+  La SUPABASE_SERVICE_ROLE_KEY tiene acceso total a la base de datos bypasseando
+  Row Level Security. Solo debe usarse en server-side (API routes). Si se nombra
+  accidentalmente con el prefijo NEXT_PUBLIC_, Next.js la expone al browser.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[IMPORTANTE] 20. next.config.ts está vacío — optimizaciones de producción
+──────────────────────────────────────────────────────────────────────────────
+Archivo: datalens-app/next.config.ts
+
+Estado actual:
+  La configuración de Next.js está completamente vacía.
+
+Configuraciones recomendadas para producción:
+  - `output: 'standalone'` si se dockeriza el deploy (Railway lo soporta).
+  - `compress: true` (está activo por defecto en Next.js, pero vale verificar).
+  - `experimental.serverComponentsExternalPackages: ['better-sqlite3']` puede
+    ser necesario si hay problemas de bundling del módulo nativo.
+
+
+════════════════════════════════════════════════════════════════════════════════
+  RESUMEN EJECUTIVO — PRIORIDADES
+════════════════════════════════════════════════════════════════════════════════
+
+ANTES DEL DEPLOY (obligatorio):
+  1.  Migrar DataStore a Supabase (PostgreSQL + Storage)
+  2.  Agregar export const runtime = 'nodejs' en route.ts
+  3.  Elegir Railway o Vercel Pro como plataforma (no Vercel Hobby)
+  4.  Agregar autenticación básica en la API (al menos una API key)
+  5.  Crear .env.example documentando todas las variables
+
+PARA UNA DEMO ROBUSTA (muy recomendado):
+  6.  Migrar TokenTracker a Supabase (o aceptar que el widget no funciona bien)
+  7.  Agregar validación de tamaño de archivo en el frontend (50MB límite)
+  8.  Agregar Error Boundaries en los componentes críticos
+  9.  Agregar rate limiting básico en la API
+
+NICE TO HAVE (no urgente para TFM):
+  10. Self-hostear Material Symbols (fonts)
+  11. Self-hostear archivos CSV en lugar de enviarlos en el body HTTP
+  12. Persistencia del estado del pipeline en localStorage (recovery básico)
+  13. Metadata y SEO básica (og:image, favicon)
+  14. Mover nombres de modelos Gemini a configuración centralizada
+  15. Logging estructurado (reemplazar console.log masivo)
+
+YA ESTÁ BIEN IMPLEMENTADO (no tocar):
+  - SQLiteService en memoria para el chat SQL → arquitectura correcta
+  - ManagerAgent como orquestador → arquitectura escalable
+  - Pipeline multi-step → cada request individual es manejable en tiempo
+  - ErrorTranslator con mensajes amigables → listo para usuarios finales
+  - maxDuration = 300 en route.ts → correcto para Vercel Pro / ya configurado
+  - NODE_ENV check para no exponer errores técnicos en producción → correcto
+  - TTL de 24h en sesiones de DataStore → correcto, solo necesita migrar el storage
+
+================================================================================
+  FIN DEL DOCUMENTO
+================================================================================

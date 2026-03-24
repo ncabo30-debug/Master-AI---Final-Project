@@ -5,6 +5,8 @@ import { AgentLogger } from './core/AgentLogger';
 import { LLMService } from './core/LLMService';
 import type { ProfileResult, ProfileColumnInfo, QuantitativeProfile, QuantitativeColumnProfile } from './types';
 
+const SAMPLE_SIZE = 50;
+
 /**
  * ProfilerAgent: Analyzes raw CSV data to infer real types, detect dirty
  * data patterns, and produce cleaning rules for the CleanerAgent.
@@ -33,8 +35,8 @@ export class ProfilerAgent extends AgentBase {
         }
 
         const columns = Object.keys(data[0]);
-        const sampleSize = Math.min(20, data.length);
-        const sample = data.slice(0, sampleSize);
+        // D-7: Use stratified sample (start + middle + end) instead of flat first-N
+        const sample = this.buildStratifiedSample(data);
 
         // If LLM is available, ask it to profile the data intelligently
         try {
@@ -54,6 +56,24 @@ export class ProfilerAgent extends AgentBase {
         return result;
     }
 
+    /**
+     * D-7: Build a stratified sample of up to SAMPLE_SIZE rows by taking rows
+     * from the start, middle, and end thirds of the dataset.
+     * This gives the LLM a representative view across the full file.
+     */
+    private buildStratifiedSample(data: Record<string, unknown>[]): Record<string, unknown>[] {
+        const n = data.length;
+        if (n <= SAMPLE_SIZE) return data;
+
+        const third = Math.floor(SAMPLE_SIZE / 3);
+        const start  = data.slice(0, third);
+        const midStart = Math.floor(n / 2) - Math.floor(third / 2);
+        const mid    = data.slice(midStart, midStart + third);
+        const end    = data.slice(n - (SAMPLE_SIZE - third * 2));
+
+        return [...start, ...mid, ...end].slice(0, SAMPLE_SIZE);
+    }
+
     private async profileWithAI(columns: string[], sample: Record<string, unknown>[]): Promise<ProfileResult> {
         const prompt = `Eres un experto en calidad de datos. Analiza esta muestra de un CSV y por cada columna determina:
 
@@ -62,7 +82,7 @@ export class ProfilerAgent extends AgentBase {
 3. "cleaningRules": array de instrucciones concretas de limpieza. Ejemplos: "quitar comas de miles", "parsear fechas con formatos mixtos, reemplazar invalidas con null", "convertir a float", "trim de espacios"
 
 Columnas: ${JSON.stringify(columns)}
-Muestra (primeras filas):
+Muestra (filas estratificadas — inicio, medio y fin del archivo):
 ${JSON.stringify(sample, null, 2)}
 
 Responde ÚNICAMENTE con un JSON puro:

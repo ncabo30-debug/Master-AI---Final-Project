@@ -104,7 +104,7 @@ export default function TabbedFileView({ file, queue }: TabbedFileViewProps) {
       {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
 
-        {/* Archivo original */}
+        {/* Archivo original — always shows raw data with issue highlights */}
         {activeTab === 'original' && file.rawData && (
           <div className="animate-fade-in">
             <div className="mb-4">
@@ -115,8 +115,9 @@ export default function TabbedFileView({ file, queue }: TabbedFileViewProps) {
             </div>
             <InteractiveSheet
               data={file.rawData.slice(0, 50)}
-              schema={undefined}
-              anomalies={[]}
+              schema={file.schema ?? undefined}
+              anomalies={file.dataAnomalies}
+              issueReport={file.issueReport}
             />
           </div>
         )}
@@ -128,7 +129,7 @@ export default function TabbedFileView({ file, queue }: TabbedFileViewProps) {
 
         {/* Normalización */}
         {activeTab === 'normalization' && (
-          <NormalizationTab rawData={file.rawData} cleanedData={file.cleanedData} />
+          <NormalizationTab rawData={file.rawData} cleanedData={file.cleanedData} reconciliationReport={file.reconciliationReport} />
         )}
 
         {/* Validación */}

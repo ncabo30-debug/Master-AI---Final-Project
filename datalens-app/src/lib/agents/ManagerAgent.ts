@@ -18,10 +18,12 @@ import { FileInspectorAgent } from './FileInspectorAgent';
 import { DuplicateDetectorAgent } from './DuplicateDetectorAgent';
 import { OutlierDetectorAgent } from './OutlierDetectorAgent';
 import { LLM_TIMEOUT_MS } from './core/LLMService';
+import { detectDominantDateFormat, detectMostCommonYear, parseDate, formatDateToString } from './dateUtils';
 import type {
     ProfileResult, CleanResult, VizProposalsResult, ReportConfig,
     FileInspectionResult, DuplicateReport, OutlierReport, ChatResult,
-    SchemaMap, QuestionOption, VizProposal, SpecialistCodeResult, ValidatorResult
+    SchemaMap, QuestionOption, VizProposal, SpecialistCodeResult, ValidatorResult,
+    IssueReport, DetectedIssue, ReconciliationReport
 } from './types';
 
 /**
@@ -50,8 +52,376 @@ export class ManagerAgent extends AgentBase {
         throw new Error('ManagerAgent uses targeted methods.');
     }
 
-    // ── Data Cleaning Pipeline ─────────────────────────────────
+    // ══════════════════════════════════════════════════════════
+    //  H-2: PHASE 0 — Issue Detection (reads data, touches nothing)
+    // ══════════════════════════════════════════════════════════
 
+    /**
+     * Runs all detection agents on the raw data WITHOUT modifying anything.
+     * Returns a structured IssueReport listing every problem found.
+     */
+    public async detectIssues(
+        rawData: Record<string, unknown>[],
+        rawText?: string
+    ): Promise<{
+        issueReport: IssueReport;
+        profile: ProfileResult;
+        fileInspection?: FileInspectionResult;
+        duplicateReport?: DuplicateReport;
+        outlierReport?: OutlierReport;
+    }> {
+        const sessionBus = new AgentBus(this.sessionId);
+        const ts = Date.now();
+
+        const fileInspA = new FileInspectorAgent(`file-inspector-${ts}`, this.tenantId, sessionBus);
+        const profilerA = new ProfilerAgent(`profiler-${ts}`, this.tenantId, sessionBus);
+        const dupDetA = new DuplicateDetectorAgent(`dup-detector-${ts}`, this.tenantId, sessionBus);
+        const outlierA = new OutlierDetectorAgent(`outlier-detector-${ts}`, this.tenantId, sessionBus);
+        // NOTE: FormatValidatorAgent intentionally excluded from detection phase.
+        // It validates cleaned Excel output, not raw data. Running it here on a
+        // temp-cleaned buffer generates false positives (e.g. dates-as-strings flagged
+        // per row) that inflate the issue count with column:'*' noise. It runs in
+        // applyNormalization / processDataCleaning instead.
+
+        try {
+            const issues: DetectedIssue[] = [];
+            let fileInspection: FileInspectionResult | undefined;
+
+            // 1. File inspection (encoding, delimiter)
+            if (rawText) {
+                AgentLogger.logStep(this.id, '📁 [Phase 0] Inspeccionando archivo...', this.sessionId);
+                const inspResult = await this.withTimeout(
+                    fileInspA.execute({ rawText, data: rawData }),
+                    'detectIssues:fileInspection'
+                );
+                fileInspection = inspResult.inspection;
+
+                if (inspResult.inspection.convertedToUtf8) {
+                    issues.push({
+                        id: `enc-${ts}`,
+                        agentSource: 'FileInspectorAgent',
+                        kind: 'encoding',
+                        severity: 'info',
+                        column: '*',
+                        suggestion: `Archivo convertido de ${inspResult.inspection.encoding} a UTF-8`,
+                    });
+                }
+            }
+
+            // 2. Profile columns
+            AgentLogger.logStep(this.id, '🔬 [Phase 0] Perfilando datos...', this.sessionId);
+            const profile = await this.withTimeout(
+                profilerA.execute({ data: rawData }),
+                'detectIssues:profile'
+            );
+
+            // Convert profiler detected issues to DetectedIssue[]
+            for (const col of profile.columns) {
+                for (const issue of col.detectedIssues) {
+                    issues.push({
+                        id: `prof-${col.name}-${issues.length}`,
+                        agentSource: 'ProfilerAgent',
+                        kind: 'format',
+                        severity: 'warning',
+                        column: col.name,
+                        suggestion: col.cleaningRules[0] || 'Revisar formato',
+                        example: issue,
+                    });
+                }
+            }
+
+            // Shared null-like placeholder set (mirrors CleanerAgent's replacement list)
+            const NULL_LIKE = new Set(['N/A', 'NA', 'NULL', 'NO_SABE', '-', 'UNDEFINED', 'NONE', 'NAN', '#N/A', '#REF!', '#VALUE!']);
+
+            // ── Cell-level date scan ──────────────────────────────────────────────────
+            // Detects non-standard formats AND null placeholders in date columns.
+            // Uses the same utils as CleanerAgent → normalizedValue matches Normalization tab exactly.
+            const dateColumnsWithCellIssues = new Set<string>();
+            for (const col of profile.columns) {
+                if (col.inferredType !== 'date') continue;
+                const dominantFmt = detectDominantDateFormat(rawData, col.name);
+                const yearContext = detectMostCommonYear(rawData, col.name);
+                rawData.forEach((row, rowIndex) => {
+                    const val = String(row[col.name] ?? '').trim();
+                    if (!val) return;
+
+                    if (NULL_LIKE.has(val.toUpperCase())) {
+                        dateColumnsWithCellIssues.add(col.name);
+                        issues.push({
+                            id: `datanull-${col.name}-${rowIndex}`,
+                            agentSource: 'ProfilerAgent',
+                            kind: 'null',
+                            severity: 'warning',
+                            column: col.name,
+                            rowIndex,
+                            value: val,
+                            suggestion: 'Placeholder nulo en columna de fechas',
+                            normalizedValue: '(nulo)',
+                        });
+                        return;
+                    }
+
+                    const isStd = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(val) ||
+                                  /^\d{4}-\d{2}-\d{2}/.test(val) ||
+                                  /^\d{1,2}-\d{1,2}-\d{4}$/.test(val);
+                    if (!isStd) {
+                        dateColumnsWithCellIssues.add(col.name);
+                        const parsed = parseDate(val, yearContext);
+                        const normalizedValue = parsed ? formatDateToString(parsed, dominantFmt) : undefined;
+                        issues.push({
+                            id: `dateformat-${col.name}-${rowIndex}`,
+                            agentSource: 'ProfilerAgent',
+                            kind: 'format',
+                            severity: 'warning',
+                            column: col.name,
+                            rowIndex,
+                            value: val,
+                            suggestion: `Formato no estándar, se normalizará a ${dominantFmt}`,
+                            normalizedValue,
+                        });
+                    }
+                });
+            }
+
+            // ── Cell-level number scan ────────────────────────────────────────────────
+            // Detects: currency/thousands format → shows clean number; unparseable values
+            // that will silently become null (data loss) → severity error.
+            const numColumnsWithCellIssues = new Set<string>();
+            for (const col of profile.columns) {
+                if (col.inferredType !== 'number') continue;
+                rawData.forEach((row, rowIndex) => {
+                    const raw = row[col.name];
+                    if (raw == null || raw === '') return;
+                    const val = String(raw).trim();
+                    if (!val) return;
+
+                    // Already a clean number → no issue
+                    if (!isNaN(Number(val))) return;
+
+                    // Known null placeholder → will become null
+                    if (NULL_LIKE.has(val.toUpperCase())) {
+                        numColumnsWithCellIssues.add(col.name);
+                        issues.push({
+                            id: `numnull-${col.name}-${rowIndex}`,
+                            agentSource: 'ProfilerAgent',
+                            kind: 'null',
+                            severity: 'warning',
+                            column: col.name,
+                            rowIndex,
+                            value: val,
+                            suggestion: 'Placeholder nulo en columna numérica',
+                            normalizedValue: '(nulo)',
+                        });
+                        return;
+                    }
+
+                    // Strip currency symbols, thousands separators, percentage
+                    const cleaned = val.replace(/[$€£¥,%\s]/g, '').replace(/\((\d+\.?\d*)\)/, '-$1').trim();
+                    const num = parseFloat(cleaned);
+                    if (!isNaN(num)) {
+                        numColumnsWithCellIssues.add(col.name);
+                        issues.push({
+                            id: `numformat-${col.name}-${rowIndex}`,
+                            agentSource: 'ProfilerAgent',
+                            kind: 'format',
+                            severity: 'warning',
+                            column: col.name,
+                            rowIndex,
+                            value: val,
+                            suggestion: 'Formato numérico con caracteres extra, se limpiará',
+                            normalizedValue: String(num),
+                        });
+                    } else {
+                        // Cannot parse at all → will silently become null in CleanerAgent
+                        numColumnsWithCellIssues.add(col.name);
+                        issues.push({
+                            id: `numtype-${col.name}-${rowIndex}`,
+                            agentSource: 'ProfilerAgent',
+                            kind: 'type_mismatch',
+                            severity: 'error',
+                            column: col.name,
+                            rowIndex,
+                            value: val,
+                            suggestion: 'Valor no numérico en columna de números — se perderá (quedará null)',
+                            normalizedValue: '(nulo)',
+                        });
+                    }
+                });
+            }
+
+            // 3. Run duplicate detection and outlier detection in parallel
+            AgentLogger.logStep(this.id, '🔍 [Phase 0] Detectando duplicados y outliers...', this.sessionId);
+
+            const [dupResult, outlierResult] = await Promise.all([
+                this.withTimeout(dupDetA.execute({ data: rawData }), 'detectIssues:duplicates'),
+                this.withTimeout(outlierA.execute({ data: rawData, profile }), 'detectIssues:outlierDetection'),
+            ]);
+
+            // Duplicate issues
+            if (dupResult.report.exactRemoved > 0) {
+                issues.push({
+                    id: `dup-exact-${ts}`,
+                    agentSource: 'DuplicateDetectorAgent',
+                    kind: 'duplicate',
+                    severity: 'warning',
+                    column: '*',
+                    suggestion: `${dupResult.report.exactRemoved} filas duplicadas exactas serán eliminadas`,
+                });
+            }
+            for (const partial of dupResult.report.partialFlagged) {
+                issues.push({
+                    id: `dup-partial-${partial.rowIndex}`,
+                    agentSource: 'DuplicateDetectorAgent',
+                    kind: 'duplicate',
+                    severity: 'info',
+                    column: '*',
+                    rowIndex: partial.rowIndex,
+                    suggestion: `Fila ${partial.rowIndex} coincide parcialmente con fila ${partial.matchedWith}`,
+                });
+            }
+
+            // Outlier issues (one per extreme value, max 3 per column to avoid noise)
+            for (const outlier of outlierResult.outliers) {
+                for (const val of outlier.extremeValues.slice(0, 3)) {
+                    issues.push({
+                        id: `outlier-${outlier.column}-${val}`,
+                        agentSource: 'OutlierDetectorAgent',
+                        kind: 'outlier',
+                        severity: 'warning',
+                        column: outlier.column,
+                        value: val,
+                        suggestion: `Valor inusual ${val} (rango normal: ${outlier.lowerBound ?? '?'} – ${outlier.upperBound ?? '?'})`,
+                    });
+                }
+            }
+
+            // Remove column-level profiler issues for any column that now has cell-level coverage
+            const columnsWithCellIssues = new Set([...dateColumnsWithCellIssues, ...numColumnsWithCellIssues]);
+            const finalIssues = issues.filter(i =>
+                !(i.agentSource === 'ProfilerAgent' && i.rowIndex === undefined && columnsWithCellIssues.has(i.column))
+            );
+
+            // Build the structured report
+            const issuesByColumn: Record<string, DetectedIssue[]> = {};
+            for (const issue of finalIssues) {
+                const key = issue.column;
+                if (!issuesByColumn[key]) issuesByColumn[key] = [];
+                issuesByColumn[key].push(issue);
+            }
+
+            const criticalCount = finalIssues.filter(i => i.severity === 'error').length;
+            const warningCount = finalIssues.filter(i => i.severity === 'warning').length;
+
+            const issueReport: IssueReport = {
+                issues: finalIssues,
+                issuesByColumn,
+                totalIssues: finalIssues.length,
+                criticalCount,
+                warningCount,
+            };
+
+            AgentLogger.logStep(this.id,
+                `📋 [Phase 0] Detección completa: ${finalIssues.length} issues (${criticalCount} críticos, ${warningCount} warnings)`,
+                this.sessionId
+            );
+
+            return {
+                issueReport,
+                profile,
+                fileInspection,
+                duplicateReport: dupResult.report,
+                outlierReport: outlierResult,
+            };
+        } finally {
+            fileInspA.dispose(); profilerA.dispose(); dupDetA.dispose(); outlierA.dispose();
+            AgentRegistry.unregister(fileInspA.id); AgentRegistry.unregister(profilerA.id);
+            AgentRegistry.unregister(dupDetA.id); AgentRegistry.unregister(outlierA.id);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  H-2: PHASE 2 — Apply Normalization (only after user approval)
+    // ══════════════════════════════════════════════════════════
+
+    /**
+     * Applies cleaning/normalization to the original data based on approved issues.
+     * If approvedIssueIds is empty or undefined, applies ALL cleaning rules (applyAll mode).
+     */
+    public async applyNormalization(
+        rawData: Record<string, unknown>[],
+        profile: ProfileResult,
+        _approvedIssueIds?: string[]
+    ): Promise<{
+        cleanedData: Record<string, unknown>[];
+        excelBuffer: Uint8Array;
+        duplicateReport?: DuplicateReport;
+    }> {
+        const sessionBus = new AgentBus(this.sessionId);
+        const ts = Date.now();
+        const cleanerA = new CleanerAgent(`cleaner-${ts}`, this.tenantId, sessionBus);
+        const dupDetA = new DuplicateDetectorAgent(`dup-detector-${ts}`, this.tenantId, sessionBus);
+
+        try {
+            AgentLogger.logStep(this.id, '🧹 [Phase 2] Aplicando normalización...', this.sessionId);
+
+            const cleanResult = await this.withTimeout(
+                cleanerA.execute({ data: rawData, profile, iteration: 1 }),
+                'applyNormalization:clean'
+            );
+
+            AgentLogger.logStep(this.id, '🔍 [Phase 2] Eliminando duplicados...', this.sessionId);
+            const dupResult = await this.withTimeout(
+                dupDetA.execute({ data: cleanResult.cleanedData }),
+                'applyNormalization:duplicates'
+            );
+
+            AgentLogger.logStep(this.id,
+                `✅ [Phase 2] Normalización completa: ${dupResult.cleanedData.length} filas, ${dupResult.report.exactRemoved} duplicados eliminados.`,
+                this.sessionId
+            );
+
+            return {
+                cleanedData: dupResult.cleanedData,
+                excelBuffer: cleanResult.excelBuffer,
+                duplicateReport: dupResult.report,
+            };
+        } finally {
+            cleanerA.dispose(); dupDetA.dispose();
+            AgentRegistry.unregister(cleanerA.id); AgentRegistry.unregister(dupDetA.id);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  H-10: Reconciliation — verify semantic equivalence
+    // ══════════════════════════════════════════════════════════
+
+    /**
+     * After normalization, verifies cell-by-cell that the semantic meaning
+     * of the data has been preserved. Returns a ReconciliationReport.
+     */
+    public reconcile(
+        originalData: Record<string, unknown>[],
+        cleanedData: Record<string, unknown>[],
+        profile: ProfileResult,
+        duplicatesRemoved: number
+    ): ReconciliationReport {
+        const sessionBus = new AgentBus(this.sessionId);
+        const ts = Date.now();
+        const intAudA = new IntegrityAuditorAgent(`reconcile-${ts}`, this.tenantId, sessionBus);
+
+        try {
+            return intAudA.reconcile(originalData, cleanedData, profile, duplicatesRemoved);
+        } finally {
+            intAudA.dispose();
+            AgentRegistry.unregister(intAudA.id);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //  DEPRECATED: Legacy Data Cleaning Pipeline (backward compat)
+    // ══════════════════════════════════════════════════════════
+
+    /** @deprecated Use detectIssues() + applyNormalization() instead. */
     public async processDataCleaning(
         rawData: Record<string, unknown>[],
         rawText?: string
@@ -244,10 +614,6 @@ export class ManagerAgent extends AgentBase {
 
     // ── Full Pipeline (Mejora 2): Analysis → Visualizations ──────
 
-    /**
-     * Runs Analysis + Visualization in sequence server-side.
-     * The frontend only needs to trigger once after cleaning completes.
-     */
     public async processFullPipeline(
         summaries: Record<string, string>,
         profile: ProfileResult
@@ -404,10 +770,6 @@ export class ManagerAgent extends AgentBase {
 
     // ── Chat with SQL ──────────────────────────────────────────
 
-    /**
-     * Answer a free-form chat question. ChatAgent now receives both
-     * schema and data for SQL-based answering.
-     */
     public async processChat(
         data: Record<string, unknown>[],
         schema: SchemaMap,

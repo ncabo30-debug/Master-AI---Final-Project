@@ -211,6 +211,7 @@ export interface VizProposal {
     filters?: string[];
 }
 
+
 export interface VizProposalsResult {
     proposals: VizProposal[];
 }
@@ -218,4 +219,52 @@ export interface VizProposalsResult {
 export interface FinalAuditResult {
     passed: boolean;
     discrepancies: string[];
+}
+
+// ── H-5: Issue Detection ─────────────────────────────────
+
+export type DetectedIssueKind = 'format' | 'duplicate' | 'outlier' | 'encoding' | 'null' | 'type_mismatch';
+export type DetectedIssueSeverity = 'error' | 'warning' | 'info';
+
+export interface DetectedIssue {
+    id: string;
+    agentSource: string;
+    kind: DetectedIssueKind;
+    severity: DetectedIssueSeverity;
+    column: string;
+    rowIndex?: number;
+    value?: unknown;
+    suggestion: string;
+    example?: string;
+    /** Pre-computed normalized value — shown in the preview panel before applying. */
+    normalizedValue?: string;
+}
+
+export interface IssueReport {
+    issues: DetectedIssue[];
+    issuesByColumn: Record<string, DetectedIssue[]>;
+    totalIssues: number;
+    criticalCount: number;
+    warningCount: number;
+}
+
+// ── H-10: Reconciliation ─────────────────────────────────
+
+export interface ReconciliationDiscrepancy {
+    column: string;
+    rowIndex: number;
+    originalValue: unknown;
+    cleanedValue: unknown;
+    reason: string;
+    severity: 'blocking' | 'warning';
+}
+
+export interface ReconciliationReport {
+    passed: boolean;
+    rowsAccounted: boolean;
+    reconciliationRate: number;
+    discrepancies: ReconciliationDiscrepancy[];
+    duplicatesRemoved: number;
+    blockingCount: number;
+    warningCount: number;
 }

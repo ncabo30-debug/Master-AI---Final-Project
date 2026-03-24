@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { ManagerAgent, VizExpertAgent } from '@/lib/agents';
 import { AgentBus } from '@/lib/agents/core/AgentBus';
 import {
-    storeData, getData, getExcelBuffer, getProfile,
-    storeCleaningResult, generateSessionId,
+    storeData, getData, getOriginalData, getExcelBuffer, getProfile,
+    storeCleaningResult, generateSessionId, storeIssueReport, getIssueReport,
     updateSession, getAnalysis, getSummaries, getSchema, getSchemaBlueprint
 } from '@/lib/DataStore';
 import { translateError } from '@/lib/ErrorTranslator';
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
         let sessionId = incomingSessionId || null;
 
         // For actions that need data, resolve it
-        const actionsNeedingData = ['clean_data', 'analyze_schema', 'generate_report', 'generate_dashboard', 'chat', 'full_pipeline'];
+        const actionsNeedingData = ['clean_data', 'detect_issues', 'analyze_schema', 'generate_report', 'generate_dashboard', 'chat', 'full_pipeline'];
         let resolvedData: Record<string, unknown>[] | null = null;
 
         if (actionsNeedingData.includes(action!)) {
@@ -58,25 +58,112 @@ export async function POST(req: Request) {
 
         const manager = new ManagerAgent(managerId, 'tenant-default', localBus, resolvedSessionId);
 
-        // ── ACTION: clean_data ──
+        // ══════════════════════════════════════════════════════
+        //  H-3: ACTION — detect_issues (Phase 0: detection only)
+        // ══════════════════════════════════════════════════════
+
+        if (action === 'detect_issues') {
+            console.log(`[API] [Phase 0] Detectando issues para ${resolvedData!.length} filas.`);
+            const rawText = body.rawText || undefined;
+
+            const result = await manager.detectIssues(resolvedData!, rawText);
+
+            // Store original data (immutable) + issue report
+            storeData(sessionId!, resolvedData!);
+            storeIssueReport(sessionId!, result.issueReport);
+            updateSession(sessionId!, {
+                profile: result.profile,
+                ...(result.fileInspection && { fileInspection: result.fileInspection }),
+                ...(result.duplicateReport && { duplicateReport: result.duplicateReport }),
+                ...(result.outlierReport && { outlierReport: result.outlierReport }),
+            });
+
+            return NextResponse.json({
+                sessionId,
+                issueReport: result.issueReport,
+                profile: result.profile,
+                fileInspection: result.fileInspection || null,
+                message: `Detección completa: ${result.issueReport.totalIssues} issues encontrados.`,
+            });
+        }
+
+        // ══════════════════════════════════════════════════════
+        //  H-3: ACTION — apply_cleaning (Phase 2: normalize after user approval)
+        // ══════════════════════════════════════════════════════
+
+        if (action === 'apply_cleaning') {
+            if (!sessionId) {
+                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
+            }
+
+            const originalData = getOriginalData(sessionId);
+            if (!originalData) {
+                return NextResponse.json({ error: 'No original data found. Run detect_issues first.' }, { status: 404 });
+            }
+
+            const profile = getProfile(sessionId);
+            if (!profile) {
+                return NextResponse.json({ error: 'No profile found. Run detect_issues first.' }, { status: 404 });
+            }
+
+            const approvedIssueIds: string[] | undefined = body.approvedIssueIds;
+            console.log(`[API] [Phase 2] Aplicando normalización con ${approvedIssueIds?.length ?? 'ALL'} issues aprobados.`);
+
+            const normResult = await manager.applyNormalization(originalData, profile, approvedIssueIds);
+
+            // Store cleaned data
+            storeCleaningResult(sessionId, normResult.cleanedData, normResult.excelBuffer, profile);
+
+            // Build summaries from the cleaning pipeline
+            const summaries: Record<string, string> = {
+                'Profiler': `Perfiló ${profile.columns.length} columnas: ${profile.columns.map(c => `${c.name}(${c.inferredType})`).join(', ')}`,
+                'Cleaner': `Limpió ${normResult.cleanedData.length} filas y generó Excel formateado.`,
+                'Validator': 'Validó que los tipos sobrevivieron la serialización a Excel.',
+                'Auditor': `Verificó integridad: ${normResult.cleanedData.length} filas consistentes con el CSV original.`
+            };
+            if (normResult.duplicateReport) {
+                const dr = normResult.duplicateReport;
+                summaries['Duplicados'] = `${dr.exactRemoved} duplicados exactos eliminados, ${dr.partialFlagged.length} parciales flaggeados.`;
+            }
+            updateSession(sessionId, {
+                summaries,
+                ...(normResult.duplicateReport && { duplicateReport: normResult.duplicateReport }),
+            });
+
+            // H-10: Reconciliation
+            const reconciliationReport = manager.reconcile(
+                originalData,
+                normResult.cleanedData,
+                profile,
+                normResult.duplicateReport?.exactRemoved ?? 0
+            );
+
+            return NextResponse.json({
+                sessionId,
+                cleanedData: normResult.cleanedData,
+                cleanedRowCount: normResult.cleanedData.length,
+                duplicateReport: normResult.duplicateReport || null,
+                reconciliationReport,
+                message: `Normalización completa. Reconciliación: ${reconciliationReport.reconciliationRate}%.`,
+            });
+        }
+
+        // ── ACTION: clean_data (DEPRECATED — backward compat) ──
         if (action === 'clean_data') {
-            console.log(`[API] Iniciando pipeline de limpieza para ${resolvedData!.length} filas.`);
-            const rawText = body.rawText || undefined; // M2: raw CSV text for encoding detection
+            console.log(`[API] [DEPRECATED] Iniciando pipeline de limpieza para ${resolvedData!.length} filas.`);
+            const rawText = body.rawText || undefined;
             const cleaningResult = await manager.processDataCleaning(resolvedData!, rawText);
 
-            // Build summaries from the cleaning pipeline (including M1+M4 reports)
             const summaries: Record<string, string> = {
                 'Profiler': `Perfiló ${cleaningResult.profile.columns.length} columnas: ${cleaningResult.profile.columns.map(c => `${c.name}(${c.inferredType})`).join(', ')}`,
                 'Cleaner': `Limpió ${cleaningResult.cleanedData.length} filas y generó Excel formateado.`,
                 'Validator': 'Validó que los tipos sobrevivieron la serialización a Excel.',
                 'Auditor': `Verificó integridad: ${cleaningResult.cleanedData.length} filas consistentes con el CSV original.`
             };
-            // M1: Duplicate report for analyst
             if (cleaningResult.duplicateReport) {
                 const dr = cleaningResult.duplicateReport;
                 summaries['Duplicados'] = `${dr.exactRemoved} duplicados exactos eliminados, ${dr.partialFlagged.length} parciales flaggeados.`;
             }
-            // M4: Outlier report for analyst
             if (cleaningResult.outlierReport && cleaningResult.outlierReport.outliers.length > 0) {
                 const or = cleaningResult.outlierReport;
                 summaries['Outliers'] = or.outliers.map(o => {
@@ -87,12 +174,10 @@ export async function POST(req: Request) {
                     return `${o.column}: valores inusuales [${vals}]${bounds}`;
                 }).join('; ');
             }
-            // M2+M7: File inspection
             if (cleaningResult.fileInspection) {
                 summaries['FileInspector'] = `Encoding: ${cleaningResult.fileInspection.encoding}, Delimitador: '${cleaningResult.fileInspection.delimiter}', Hash backup: ${cleaningResult.fileInspection.originalHash.substring(0, 16)}`;
             }
 
-            // Store cleaned data + Excel + summaries + new pipeline data
             storeCleaningResult(sessionId!, cleaningResult.cleanedData, cleaningResult.excelBuffer, cleaningResult.profile);
             updateSession(sessionId!, {
                 summaries,

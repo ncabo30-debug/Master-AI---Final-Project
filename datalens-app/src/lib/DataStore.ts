@@ -1,10 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { ProfileResult, VizProposal, FileInspectionResult, DuplicateReport, OutlierReport, SchemaMap, QuestionOption, SchemaBlueprint } from './agents/types';
+import type { ProfileResult, VizProposal, FileInspectionResult, DuplicateReport, OutlierReport, SchemaMap, QuestionOption, SchemaBlueprint, IssueReport } from './agents/types';
 
 interface StoredSession {
-    data: Record<string, unknown>[];
+    /** Original data — written once on first upload, NEVER overwritten. */
+    originalData: Record<string, unknown>[];
+    /** Cleaned/normalized data — initially equal to originalData, updated by storeCleaningResult(). */
+    cleanedData: Record<string, unknown>[];
     excelBufferBase64?: string;
     profile?: ProfileResult;
     schema?: SchemaMap;
@@ -17,6 +20,7 @@ interface StoredSession {
     originalDataSnapshot?: Record<string, unknown>[];
     duplicateReport?: DuplicateReport;
     outlierReport?: OutlierReport;
+    issueReport?: IssueReport;
     ts: number;
 }
 
@@ -55,20 +59,29 @@ function writeSession(sessionId: string, data: StoredSession): void {
     fs.writeFileSync(file, JSON.stringify(data), 'utf-8');
 }
 
+/**
+ * H-1: Stores raw data. Sets both originalData (immutable) and cleanedData (initially equal).
+ * If the session already has originalData, it is preserved — only cleanedData is refreshed.
+ */
 export function storeData(sessionId: string, data: Record<string, unknown>[]): string {
     const existing = readSession(sessionId);
     writeSession(sessionId, {
-        data,
+        originalData: existing?.originalData || data, // never overwrite original
+        cleanedData: data,
         excelBufferBase64: existing?.excelBufferBase64,
         profile: existing?.profile,
         schema: existing?.schema,
         schemaBlueprint: existing?.schemaBlueprint,
         questions: existing?.questions,
+        issueReport: existing?.issueReport,
         ts: Date.now()
     });
     return sessionId;
 }
 
+/**
+ * H-1: Updates only cleanedData + excel + profile. Never touches originalData.
+ */
 export function storeCleaningResult(
     sessionId: string,
     cleanedData: Record<string, unknown>[],
@@ -79,20 +92,28 @@ export function storeCleaningResult(
     const base64Buffer = Buffer.from(excelBuffer).toString('base64');
 
     writeSession(sessionId, {
-        ...(existing || {}),
-        data: cleanedData,
+        ...(existing || { originalData: cleanedData, cleanedData }),
+        cleanedData,
         excelBufferBase64: base64Buffer,
         profile,
         ts: Date.now()
     });
 }
 
+/** Returns cleaned data (post-normalization). All analysis agents read this. */
 export function getData(sessionId: string): Record<string, unknown>[] | null {
     const session = readSession(sessionId);
     if (!session) return null;
     session.ts = Date.now();
     writeSession(sessionId, session);
-    return session.data;
+    return session.cleanedData;
+}
+
+/** H-1: Returns the original, immutable data as uploaded by the user. */
+export function getOriginalData(sessionId: string): Record<string, unknown>[] | null {
+    const session = readSession(sessionId);
+    if (!session) return null;
+    return session.originalData;
 }
 
 export function getExcelBuffer(sessionId: string): Uint8Array | null {
@@ -111,6 +132,18 @@ export function getSchema(sessionId: string): SchemaMap | null {
 
 export function getSchemaBlueprint(sessionId: string): SchemaBlueprint | null {
     return readSession(sessionId)?.schemaBlueprint || null;
+}
+
+/** H-5: Stores the issue report produced by detectIssues(). */
+export function storeIssueReport(sessionId: string, issueReport: IssueReport): void {
+    const session = readSession(sessionId);
+    if (!session) return;
+    writeSession(sessionId, { ...session, issueReport, ts: Date.now() });
+}
+
+/** H-5: Retrieves the stored issue report. */
+export function getIssueReport(sessionId: string): IssueReport | null {
+    return readSession(sessionId)?.issueReport || null;
 }
 
 export function clearData(sessionId: string): void {

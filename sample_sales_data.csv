@@ -1,16 +1,16 @@
 Sale_ID,Sale_Date,Order_Number,Customer_Name,City,Product_ID,Product_Name,Category,Quantity,Unit_Price_ARS,Total_Amount_ARS,Payment_Method,Order_Status
-1,2026-02-01,ORD-1001,Juan Perez,Cipolletti,P001,Laptop Lenovo i5,Electronics,1,850000,850000,Credit Card,Completed
-2,2026-02-02,ORD-1002,Maria Gomez,Neuquén,P002,Wireless Mouse,Accessories,2,15000,30000,Debit Card,Completed
-3,2026-02-02,ORD-1003,Carlos Diaz,Roca,P003,Office Chair,Furniture,1,120000,120000,Bank Transfer,Completed
-4,2026-02-03,ORD-1004,Lucia Fernandez,Cipolletti,P004,Monitor 24'',Electronics,2,180000,360000,Credit Card,Completed
-5,2026-02-04,ORD-1005,Pedro Sanchez,Neuquén,P005,Mechanical Keyboard,Accessories,1,95000,95000,Cash,Completed
-6,2026-02-05,ORD-1006,Ana Lopez,Roca,P006,Desk Lamp,Furniture,3,12000,36000,Debit Card,Completed
-7,2026-02-06,ORD-1007,Martin Ruiz,Cipolletti,P007,External SSD 1TB,Electronics,1,220000,220000,Credit Card,Completed
-8,2026-02-07,ORD-1008,Sofia Torres,Neuquén,P008,USB-C Hub,Accessories,2,18000,36000,Credit Card,Completed
-9,2026-02-08,ORD-1009,Diego Morales,Roca,P009,Standing Desk,Furniture,1,450000,450000,Bank Transfer,Completed
-10,2026-02-09,ORD-1010,Valentina Cruz,Cipolletti,P010,Gaming Headset,Accessories,1,110000,110000,Credit Card,Completed
-11,2026-02-10,ORD-1011,Lucas Herrera,Neuquén,P011,Tablet Samsung,Electronics,1,390000,390000,Debit Card,Completed
-12,2026-02-11,ORD-1012,Camila Ortiz,Roca,P012,Printer HP,Electronics,1,280000,280000,Credit Card,Completed
-13,2026-02-12,ORD-1013,Nicolas Vega,Cipolletti,P013,Ergonomic Mouse Pad,Accessories,4,8000,32000,Cash,Completed
-14,2026-02-13,ORD-1014,Julieta Mendez,Neuquén,P014,Bookshelf,Furniture,1,175000,175000,Bank Transfer,Completed
-15,2026-02-14,ORD-1015,Tomas Rios,Roca,P015,Webcam HD,Electronics,2,45000,90000,Credit Card,Completed
+1,01/02/2026,ORD-1001,Juan Perez,Cipolletti,P001,Laptop Lenovo i5,Electronics,1,850000,850000,Credit Card,Completed
+2,02/02/2026,ORD-1002,Maria Gomez,Neuquén,P002,Wireless Mouse,Accessories,2,15000,30000,Debit Card,Completed
+3,02/02/2026,ORD-1003,Carlos Diaz,Roca,P003,Office Chair,Furniture,1,120000,120000,Bank Transfer,Completed
+4,03/02/2026,ORD-1004,Lucia Fernandez,Cipolletti,P004,Monitor 24'',Electronics,2,180000,360000,Credit Card,Completed
+5,04/02/2026,ORD-1005,Pedro Sanchez,Neuquén,P005,Mechanical Keyboard,Accessories,1,95000,95000,Cash,Completed
+6,05/02/2026,ORD-1006,Ana Lopez,Roca,P006,Desk Lamp,Furniture,3,12000,36000,Debit Card,Completed
+7,feb-26,ORD-1007,Martin Ruiz,Cipolletti,P007,External SSD 1TB,Electronics,1,220000,220000,Credit Card,Completed
+8,7-feb.,ORD-1008,Sofia Torres,Neuquén,P008,USB-C Hub,Accessories,2,18000,36000,Credit Card,Completed
+9,08/02/2026,ORD-1009,Diego Morales,Roca,P009,Standing Desk,Furniture,1,450000,450000,Bank Transfer,Completed
+10,20260209,ORD-1010,Valentina Cruz,Cipolletti,P010,Gaming Headset,Accessories,1,110000,110000,Credit Card,Completed
+11,10/02/2026,ORD-1011,Lucas Herrera,Neuquén,P011,Tablet Samsung,Electronics,1,390000,390000,Debit Card,Completed
+12,11/02/2026,ORD-1012,Camila Ortiz,Roca,P012,Printer HP,Electronics,1,280000,280000,Credit Card,Completed
+13,12/02/2026,ORD-1013,Nicolas Vega,Cipolletti,P013,Ergonomic Mouse Pad,Accessories,4,8000,32000,Cash,Completed
+14,13/02/2026,ORD-1014,Julieta Mendez,Neuquén,P014,Bookshelf,Furniture,1,175000,175000,Bank Transfer,Completed
+15,14/02/2026,ORD-1015,Tomas Rios,Roca,P015,Webcam HD,Electronics,2,45000,90000,Credit Card,Completed

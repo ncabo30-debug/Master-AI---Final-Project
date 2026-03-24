@@ -1,0 +1,324 @@
+================================================================================
+  DATALENS AI — PIPELINE DE DATOS: PROBLEMAS Y SOLUCIONES
+  Análisis del código fuente | Generado: 2026-03-15
+================================================================================
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PROBLEMAS CRÍTICOS (afectan la demo o producen resultados incorrectos)
+════════════════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────────────
+[BUG] 1. cleanWithAI no aplica nada — limpieza adaptativa está muerta
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/CleanerAgent.ts → método cleanWithAI()
+
+Descripción:
+  Cuando la primera limpieza falla y el pipeline reintenta (iteration >= 2),
+  se llama a cleanWithAI() que le pide instrucciones al LLM. El LLM responde
+  correctamente con un JSON de fixes por columna. El código lo parsea... y
+  devuelve los datos sin modificar. La variable `parsed` se loguea pero nunca
+  se usa para transformar los datos.
+
+Código problemático:
+  private async cleanWithAI(...): Promise<Record<string, unknown>[]> {
+      const parsed = JSON.parse(jsonContent);
+      AgentLogger.logLLMCall(...);  // solo loguea
+      // ...
+      return data;  // ← devuelve el mismo array sin cambios
+  }
+
+Impacto:
+  En caso de retry, el segundo intento de limpieza es idéntico al primero.
+  El pipeline no mejora aunque el LLM haya dado instrucciones correctas.
+  Los tests de reintentos siempre fallan igual.
+
+Solución:
+  Parsear el JSON de instrucciones y aplicar cada "fix" al dataset antes de
+  retornar. Ejemplo de implementación:
+
+  for (const fix of parsed.fixes) {
+      cleanedData = cleanedData.map(row => {
+          const val = row[fix.column];
+          if (val == null) return row;
+          // Aplicar la acción según el tipo de fix
+          if (fix.action.includes('trim')) row[fix.column] = String(val).trim();
+          if (fix.action.includes('lowercase')) row[fix.column] = String(val).toLowerCase();
+          if (fix.action.includes('null')) row[fix.column] = null;
+          // etc.
+          return row;
+      });
+  }
+  return cleanedData;  // ahora sí retorna datos modificados
+
+
+──────────────────────────────────────────────────────────────────────────────
+[BUG] 2. Checksum del IntegrityAuditor genera falsos positivos
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/IntegrityAuditorAgent.ts → método execute()
+
+Descripción:
+  El auditor compara la suma de valores de cada columna antes y después de
+  la limpieza para verificar que los números no cambiaron. El problema está
+  en cómo calcula la suma del raw:
+
+    rawSum: usa Number(String(row[col]).replace(/,/g, ''))
+    cleanSum: usa Number(row[col])
+
+  Caso problemático: si una columna tenía valores "N/A" o "NULL" que el
+  CleanerAgent convirtió en null, la rawSum era 0 (porque Number("N/A") = NaN,
+  se ignora). Pero si también tenía "1,500" → 1500, puede haber discrepancias
+  por cómo se parsea el string vs el número ya convertido, disparando un error
+  de checksum sobre datos perfectamente válidos.
+
+Impacto:
+  El pipeline puede mostrar un error de auditoría aunque la limpieza fue
+  correcta. Genera desconfianza en los resultados.
+
+Solución:
+  Normalizar ambas sumas con el mismo método antes de comparar.
+  Usar la misma lógica de parseo (quitar comas, símbolo de moneda) en ambos:
+
+  const normalize = (v: unknown) => {
+      const n = Number(String(v).replace(/[$€£¥,]/g, '').trim());
+      return isNaN(n) ? 0 : n;
+  };
+  const rawSum = rawData.reduce((acc, row) => acc + normalize(row[col]), 0);
+  const cleanSum = cleanedData.reduce((acc, row) => acc + normalize(row[col]), 0);
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PROBLEMAS IMPORTANTES (afectan calidad del análisis)
+════════════════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────────────
+[CALIDAD] 3. Sin normalización de columnas categóricas (strings)
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/CleanerAgent.ts → applyColumnCleaning()
+
+Descripción:
+  Para columnas de tipo string, el limpiador solo hace trim(). No normaliza
+  mayúsculas/minúsculas ni variantes de un mismo valor. Un archivo real puede
+  tener una columna "Estado" con:
+    "Activo", "activo", "ACTIVO", "Active", "Activo " (con espacio)
+  El CleanerAgent los deja como están. Cuando el ChatAgent ejecuta SQL:
+    SELECT Estado, COUNT(*) FROM datos GROUP BY Estado
+  Devuelve 5 grupos en lugar de 1.
+
+Impacto:
+  El chat SQL y los dashboards agrupados muestran datos fragmentados.
+  El AnalystAgent puede concluir cosas incorrectas sobre distribuciones.
+
+Solución:
+  Agregar normalización para columnas categóricas de baja cardinalidad.
+  Heurística simple: si la columna tiene <= 20 valores únicos en la muestra,
+  convertir a lowercase y trim antes de guardar.
+
+  if (targetType === 'string') {
+      const uniques = new Set(data.map(r => String(r[colName]).trim().toLowerCase()));
+      const isCategorical = uniques.size <= 20;
+      return data.map(row => {
+          let val = String(row[colName]).trim();
+          if (isCategorical) val = val.toLowerCase();
+          row[colName] = val;
+          return row;
+      });
+  }
+
+
+──────────────────────────────────────────────────────────────────────────────
+[CALIDAD] 4. Ambigüedad en el parseo de fechas dd/MM vs MM/dd
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/CleanerAgent.ts → método parseDate()
+
+Descripción:
+  El método tiene dos regex que son idénticos:
+    const ddmmyyyy = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    const mmddyyyy = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  El primer match siempre gana, así que todas las fechas ambiguas como
+  "05/12/2024" se tratan como dd/MM/yyyy (5 de diciembre).
+  Si el archivo venía con formato MM/dd/yyyy americano, todas las fechas
+  van a ser incorrectas sin ningún aviso al usuario.
+
+Impacto:
+  Fechas silenciosamente incorrectas. Un análisis de ventas por mes puede
+  mostrar todo en el mes equivocado.
+
+Solución:
+  Detectar el formato mayoritario de la columna antes de parsear todas las
+  filas. Tomar una muestra de 20 valores, contar cuántos producen fechas
+  válidas con cada formato, y usar el que tenga mayor éxito:
+
+  private inferDateFormat(sample: string[]): 'dmy' | 'mdy' {
+      let dmyValid = 0, mdyValid = 0;
+      for (const v of sample) {
+          const parts = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+          if (!parts) continue;
+          const [, a, b] = parts;
+          if (Number(a) <= 12 && Number(b) <= 31) dmyValid++;
+          if (Number(a) <= 12 && Number(b) > 12) mdyValid++;
+          if (Number(a) > 12 && Number(b) <= 12) dmyValid++;
+      }
+      return dmyValid >= mdyValid ? 'dmy' : 'mdy';
+  }
+
+
+──────────────────────────────────────────────────────────────────────────────
+[CALIDAD] 5. El hashing de duplicados usa JSON.stringify, no un hash real
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/DuplicateDetectorAgent.ts → métodos hashRow()
+
+Descripción:
+  hashRow() serializa la fila con JSON.stringify(Object.values(row)).
+  Problema: en JavaScript, el orden de las propiedades de un objeto no está
+  garantizado en todos los entornos. Si dos filas idénticas tienen propiedades
+  en distinto orden (puede ocurrir con CSVs con columnas inconsistentes),
+  JSON.stringify produce strings distintos → no se detecta el duplicado.
+  Además, JSON.stringify es más lento que un hash real para filas grandes.
+
+Impacto:
+  Duplicados exactos pueden no ser detectados en archivos con columnas
+  desordenadas. El reporte de duplicados subestimaría el problema real.
+
+Solución:
+  Ordenar las claves antes de serializar para garantizar consistencia:
+
+  private hashRow(row: Record<string, unknown>): string {
+      const sortedValues = Object.keys(row).sort().map(k => row[k]);
+      return JSON.stringify(sortedValues);
+  }
+
+  Para mayor robustez en producción, usar crypto.createHash('md5') con el
+  mismo JSON ordenado.
+
+
+════════════════════════════════════════════════════════════════════════════════
+  PROBLEMAS MENORES (limitaciones conocidas, no rompen la demo)
+════════════════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────────────
+[LIMITACIÓN] 6. La detección de encoding llega demasiado tarde
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/FileInspectorAgent.ts
+         src/lib/csvParser.ts (frontend)
+
+Descripción:
+  El CSV se parsea con PapaParse en el browser (lado cliente) ANTES de llegar
+  al backend. El FileInspectorAgent recibe el texto ya decodificado por
+  el browser como string JavaScript (UTF-16 internamente). Si el archivo
+  original era Latin-1 o Windows-1252 (común en CSVs de Argentina/España),
+  el browser ya puede haber malinterpretado los caracteres especiales (ñ, á,
+  é, etc.) antes de que el agente pueda detectar el encoding.
+
+  La función detectEncoding() del agente trabaja sobre un string ya procesado,
+  así que su detección de "latin-1" es una heurística sobre caracteres Unicode,
+  no sobre los bytes reales del archivo.
+
+Impacto:
+  Para archivos con encoding incorrecto, los caracteres especiales del español
+  pueden aparecer como símbolos extraños (ej: "VenezÃ¼ela" en lugar de
+  "Venezuela"). El agente lo detectaría como problema pero ya es tarde
+  para corregirlo correctamente.
+
+Solución (para producción):
+  Mover el upload a un endpoint que reciba el archivo binario (no parseado).
+  El backend puede usar el módulo 'iconv-lite' para detectar y convertir
+  el encoding correctamente antes de parsear.
+  Para la demo actual, documentar que se soportan CSVs en UTF-8.
+
+
+──────────────────────────────────────────────────────────────────────────────
+[LIMITACIÓN] 7. Muestra del ProfilerAgent es de solo 20 filas
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/ProfilerAgent.ts → método execute()
+
+Descripción:
+  const sampleSize = Math.min(20, data.length);
+  El LLM analiza solo las primeras 20 filas para inferir tipos y detectar
+  problemas. Para archivos donde los primeros 20 registros son "limpios" pero
+  el resto tiene problemas (ej: un CSV exportado donde las primeras filas son
+  datos de prueba), el profiler puede no detectar los problemas reales.
+
+Impacto:
+  Problemas que aparecen después de la fila 20 (formatos mixtos de fecha,
+  valores raros en columnas numéricas) pueden no ser detectados.
+
+Solución:
+  Aumentar a 50-100 filas para la muestra del LLM. También hacer un muestreo
+  estratificado: tomar filas del inicio, medio y fin del archivo en lugar
+  de solo las primeras.
+
+  const indices = [0, Math.floor(data.length/4), Math.floor(data.length/2),
+                   Math.floor(3*data.length/4), data.length-1];
+  const sample = indices.flatMap(i => data.slice(i, i+10));
+
+
+──────────────────────────────────────────────────────────────────────────────
+[LIMITACIÓN] 8. Outliers detectados pero sin acción disponible para el usuario
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/OutlierDetectorAgent.ts
+
+Descripción:
+  El agente detecta correctamente outliers con IQR y los reporta en la UI
+  como anomalías. Sin embargo, el usuario no puede hacer nada con ellos:
+  no puede aceptarlos (marcar como válidos), eliminarlos, ni corregirlos.
+  Son informativos pero no accionables.
+
+Impacto:
+  El usuario ve la alerta de outlier pero no tiene herramientas para
+  resolverla. Para un dashboard final, esos outliers pueden distorsionar
+  la visualización sin que el usuario pueda removerlos fácilmente.
+
+Solución (roadmap):
+  Agregar acciones en el InteractiveSheet para cada anomalía:
+  - "Marcar como válido" → quita el flag, no modifica el dato
+  - "Reemplazar con nulo" → elimina el valor pero mantiene la fila
+  - "Eliminar fila" → marca la fila para exclusión del análisis
+
+
+──────────────────────────────────────────────────────────────────────────────
+[LIMITACIÓN] 9. No se eliminan filas completamente vacías post-limpieza
+──────────────────────────────────────────────────────────────────────────────
+Archivo: src/lib/agents/CleanerAgent.ts
+
+Descripción:
+  PapaParse en el browser filtra líneas vacías con `skipEmptyLines: true`.
+  Pero después de la limpieza, puede haber filas donde TODOS los valores
+  quedaron convertidos a null (ej: una fila que era "N/A, N/A, N/A, N/A").
+  Estas filas fantasma permanecen en el dataset limpio.
+
+Impacto:
+  Filas con todos los valores en null son ruido que puede distorsionar
+  el COUNT(*) en queries SQL y el análisis del AnalystAgent.
+
+Solución:
+  Agregar un paso final en CleanerAgent que filtre filas donde todos los
+  valores son null o string vacío:
+
+  cleanedData = cleanedData.filter(row =>
+      Object.values(row).some(v => v !== null && v !== '')
+  );
+
+
+================================================================================
+  RESUMEN DE PRIORIDADES
+================================================================================
+
+  PRIORIDAD ALTA — arreglar antes de la demo:
+    [BUG 1] cleanWithAI no aplica las instrucciones del LLM
+    [BUG 2] Checksum con falsos positivos en IntegrityAuditor
+
+  PRIORIDAD MEDIA — mejoran la calidad del análisis:
+    [CALIDAD 3] Normalización de columnas categóricas
+    [CALIDAD 4] Detección del formato de fecha (dd/MM vs MM/dd)
+    [CALIDAD 5] Hash de duplicados con claves ordenadas
+
+  PRIORIDAD BAJA — mejoras para producción:
+    [LIMITACIÓN 6] Encoding detection en backend (requiere cambio de arquitectura)
+    [LIMITACIÓN 7] Aumentar muestra del ProfilerAgent a 50-100 filas
+    [LIMITACIÓN 8] Acciones para outliers en la UI
+    [LIMITACIÓN 9] Filtrar filas completamente nulas post-limpieza
+
+================================================================================
+  FIN DEL DOCUMENTO
+================================================================================

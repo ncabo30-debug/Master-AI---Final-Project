@@ -3,7 +3,7 @@
 /**
  * useFileQueue.ts
  * Central React hook that owns the multi-file state machine.
- * Replaces all state management previously in page.tsx.
+ * H-6: Split pipeline into runDetection → user reviews → confirmAndClean → runPipelinePhase2
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
@@ -16,7 +16,7 @@ import {
   getNextQueued,
 } from './fileQueue';
 import { parseCSVFile } from './csvParser';
-import type { EnrichedSchemaField, OutlierReport, DataAnomaly, VizProposal } from './agents/types';
+import type { EnrichedSchemaField, OutlierReport, DataAnomaly, VizProposal, IssueReport } from './agents/types';
 
 // ── Anomaly helper (migrated from page.tsx) ────────────────
 
@@ -116,9 +116,11 @@ export function useFileQueue() {
     });
   }, []);
 
-  // ── Pipeline ───────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════
+  //  H-6: Phase 0 — Detection (replaces old runPipelinePhase1)
+  // ══════════════════════════════════════════════════════════
 
-  const runPipelinePhase1 = useCallback(
+  const runDetection = useCallback(
     async (fileId: string) => {
       const file = filesRef.current.get(fileId);
       if (!file || !file.rawData) return;
@@ -126,22 +128,62 @@ export function useFileQueue() {
       if (file.status !== 'QUEUED') return;
 
       try {
-        // PARSING: clean_data
-        patchFile(fileId, { status: 'PARSING' });
+        // DETECTING: detect_issues
+        patchFile(fileId, { status: 'DETECTING' });
 
-        const cleanResult = await apiPost({
-          action: 'clean_data',
+        const detectResult = await apiPost({
+          action: 'detect_issues',
           data: file.rawData,
         });
 
-        const sessionId: string = cleanResult.sessionId;
-        const cleanedData: Record<string, unknown>[] = cleanResult.cleanedData ?? file.rawData;
+        const sessionId: string = detectResult.sessionId;
+        const issueReport: IssueReport = detectResult.issueReport;
+
+        // Derive local anomalies for backward compat
         const dataAnomalies = deriveLocalAnomaliesFromOutliers(
           file.rawData,
-          cleanResult.outlierReport
+          detectResult.outlierReport ?? null
         );
 
-        patchFile(fileId, { sessionId, cleanedData, dataAnomalies });
+        patchFile(fileId, {
+          sessionId,
+          issueReport,
+          dataAnomalies,
+          status: 'AWAITING_VALIDATION',
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Error desconocido';
+        patchFile(fileId, { status: 'ERROR', error: msg });
+      }
+    },
+    [patchFile]
+  );
+
+  // ══════════════════════════════════════════════════════════
+  //  H-6: Phase 2 — Cleaning + Schema + Analysis
+  // ══════════════════════════════════════════════════════════
+
+  const runCleaning = useCallback(
+    async (fileId: string, approvedIssueIds?: string[]) => {
+      const file = filesRef.current.get(fileId);
+      if (!file || !file.sessionId) return;
+
+      const { sessionId } = file;
+
+      try {
+        // CLEANING: apply_cleaning
+        patchFile(fileId, { status: 'CLEANING' });
+
+        const cleanResult = await apiPost({
+          action: 'apply_cleaning',
+          sessionId,
+          approvedIssueIds,
+        });
+
+        patchFile(fileId, {
+          cleanedData: cleanResult.cleanedData ?? null,
+          reconciliationReport: cleanResult.reconciliationReport ?? null,
+        });
 
         // SCHEMA_DETECTION: analyze_schema
         patchFile(fileId, { status: 'SCHEMA_DETECTION' });
@@ -155,26 +197,8 @@ export function useFileQueue() {
           schema: schemaResult.schema,
           schemaBlueprint: schemaResult.schemaBlueprint,
           questions: schemaResult.questions,
-          status: 'AWAITING_VALIDATION',
         });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Error desconocido';
-        patchFile(fileId, { status: 'ERROR', error: msg });
-      }
-    },
-    [patchFile]
-  );
 
-  const runPipelinePhase2 = useCallback(
-    async (fileId: string) => {
-      const file = filesRef.current.get(fileId);
-      if (!file || !file.sessionId) return;
-      // Guard: only continue from AWAITING_VALIDATION (prevents double-invocation)
-      if (file.status !== 'AWAITING_VALIDATION') return;
-
-      const { sessionId } = file;
-
-      try {
         // NORMALIZING: generate_analysis
         patchFile(fileId, { status: 'NORMALIZING' });
 
@@ -206,6 +230,46 @@ export function useFileQueue() {
     [patchFile]
   );
 
+  // ── Legacy Phase 2 (backward compat — used if pipeline is already cleaned) ──
+
+  const runPipelinePhase2 = useCallback(
+    async (fileId: string) => {
+      const file = filesRef.current.get(fileId);
+      if (!file || !file.sessionId) return;
+      if (file.status !== 'AWAITING_VALIDATION') return;
+
+      const { sessionId } = file;
+
+      try {
+        patchFile(fileId, { status: 'NORMALIZING' });
+
+        const analysisResult = await apiPost({
+          action: 'generate_analysis',
+          sessionId,
+        });
+
+        patchFile(fileId, { analysis: analysisResult.analysis });
+
+        patchFile(fileId, { status: 'VALIDATING' });
+
+        const vizResult = await apiPost({
+          action: 'propose_visualizations',
+          sessionId,
+        });
+
+        patchFile(fileId, {
+          vizProposals: vizResult.proposals,
+          status: 'READY',
+          activeTab: 'dashboard',
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Error desconocido';
+        patchFile(fileId, { status: 'ERROR', error: msg });
+      }
+    },
+    [patchFile]
+  );
+
   // ── Queue manager effect ───────────────────────────────
 
   // Whenever files map changes, check if any QUEUED file can start
@@ -214,8 +278,8 @@ export function useFileQueue() {
     if (!canStartProcessing(currentFiles)) return;
     const next = getNextQueued(currentFiles);
     if (!next) return;
-    runPipelinePhase1(next.fileId);
-  }, [files, runPipelinePhase1]);
+    runDetection(next.fileId);
+  }, [files, runDetection]);
 
   // ── Public API ─────────────────────────────────────────
 
@@ -252,6 +316,18 @@ export function useFileQueue() {
     []
   );
 
+  /**
+   * H-6: Called after the user reviews issues and confirms.
+   * Triggers cleaning + schema + analysis + viz in sequence.
+   */
+  const confirmAndClean = useCallback(
+    (fileId: string, approvedIssueIds?: string[]) => {
+      runCleaning(fileId, approvedIssueIds);
+    },
+    [runCleaning]
+  );
+
+  /** @deprecated Use confirmAndClean instead. Kept for backward compat. */
   const confirmSchema = useCallback(
     (fileId: string) => {
       runPipelinePhase2(fileId);
@@ -305,10 +381,6 @@ export function useFileQueue() {
     [patchFile]
   );
 
-  /**
-   * Called by TabbedFileView after VizProposalPanel already validated the viz.
-   * Only calls generate_dashboard (validate_viz was already done by VizProposalPanel internally).
-   */
   const generateDashboard = useCallback(
     async (fileId: string, viz: VizProposal) => {
       const file = filesRef.current.get(fileId);
@@ -374,7 +446,6 @@ export function useFileQueue() {
 
       setSelectedFileId((prev) => {
         if (prev !== fileId) return prev;
-        // Select another file if available
         const remaining = Array.from(filesRef.current.keys()).filter((k) => k !== fileId);
         return remaining[0] ?? null;
       });
@@ -404,7 +475,8 @@ export function useFileQueue() {
     selectedFile,
     readyFiles,
     enqueueFiles,
-    confirmSchema,
+    confirmAndClean,
+    confirmSchema, // deprecated compat
     handleSchemaOverride,
     reviseAnalysis,
     approveAnalysis,

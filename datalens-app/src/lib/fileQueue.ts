@@ -11,15 +11,18 @@ import type {
   VizProposal,
   ReportConfig,
   DataAnomaly,
+  IssueReport,
+  ReconciliationReport,
 } from './agents/types';
 
 // ── File pipeline states ───────────────────────────────────
 
 export type FileStatus =
   | 'QUEUED'
-  | 'PARSING'
-  | 'SCHEMA_DETECTION'
+  | 'DETECTING'
   | 'AWAITING_VALIDATION'
+  | 'CLEANING'
+  | 'SCHEMA_DETECTION'
   | 'NORMALIZING'
   | 'VALIDATING'
   | 'READY'
@@ -27,7 +30,8 @@ export type FileStatus =
 
 /** States that occupy a processing slot (max 2 concurrent). */
 const ACTIVE_STATES: FileStatus[] = [
-  'PARSING',
+  'DETECTING',
+  'CLEANING',
   'SCHEMA_DETECTION',
   'NORMALIZING',
   'VALIDATING',
@@ -37,9 +41,10 @@ const ACTIVE_STATES: FileStatus[] = [
 
 export const FILE_STATUS_LABEL: Record<FileStatus, string> = {
   QUEUED:               'En cola',
-  PARSING:              'Analizando archivo...',
-  SCHEMA_DETECTION:     'Detectando esquema...',
+  DETECTING:            'Detectando problemas...',
   AWAITING_VALIDATION:  'Requiere atención',
+  CLEANING:             'Normalizando datos...',
+  SCHEMA_DETECTION:     'Detectando esquema...',
   NORMALIZING:          'Normalizando datos...',
   VALIDATING:           'Validando...',
   READY:                'Listo',
@@ -49,9 +54,10 @@ export const FILE_STATUS_LABEL: Record<FileStatus, string> = {
 /** CSS class for the status dot. Defined as explicit strings so Tailwind never purges them. */
 export const FILE_STATUS_DOT_CLASS: Record<FileStatus, string> = {
   QUEUED:               'dot-queued',
-  PARSING:              'dot-processing',
-  SCHEMA_DETECTION:     'dot-processing',
+  DETECTING:            'dot-processing',
   AWAITING_VALIDATION:  'dot-awaiting',
+  CLEANING:             'dot-processing',
+  SCHEMA_DETECTION:     'dot-processing',
   NORMALIZING:          'dot-processing',
   VALIDATING:           'dot-processing',
   READY:                'dot-ready',
@@ -69,7 +75,7 @@ export interface FileRecord {
   status:           FileStatus;
   /** Raw rows parsed from the CSV (before any cleaning). */
   rawData:          Record<string, unknown>[] | null;
-  /** Rows returned by the clean_data API action. */
+  /** Rows returned by the apply_cleaning API action. */
   cleanedData:      Record<string, unknown>[] | null;
   schema:           SchemaMap | null;
   schemaBlueprint:  SchemaBlueprint | null;
@@ -79,6 +85,10 @@ export interface FileRecord {
   vizProposals:     VizProposal[] | null;
   reportConfig:     ReportConfig | null;
   dataAnomalies:    DataAnomaly[];
+  /** H-5: Structured issue report from detection phase. */
+  issueReport:      IssueReport | null;
+  /** H-10: Reconciliation report after normalization. */
+  reconciliationReport: ReconciliationReport | null;
   auditPassed:      boolean | null;
   activeTab:        ActiveTab;
   error:            string | null;
@@ -109,6 +119,8 @@ export function createFileRecord(
     vizProposals:     null,
     reportConfig:     null,
     dataAnomalies:    [],
+    issueReport:      null,
+    reconciliationReport: null,
     auditPassed:      null,
     activeTab:        'dashboard',
     error:            null,

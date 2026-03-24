@@ -116,8 +116,13 @@ export class DuplicateDetectorAgent extends AgentBase {
         return keys.length > 0 ? keys : cols.slice(0, 2); // Fallback: primeras 2 columnas
     }
 
+    /**
+     * D-5: Sort keys before serializing to make hash order-independent.
+     * Prevents same row with different key insertion order from producing different hashes.
+     */
     private hashRow(row: Record<string, unknown>): string {
-        return JSON.stringify(Object.values(row));
+        const sortedKeys = Object.keys(row).sort();
+        return JSON.stringify(sortedKeys.map(k => [k, row[k]]));
     }
 
     private hashRowByColumns(row: Record<string, unknown>, cols: string[]): string {

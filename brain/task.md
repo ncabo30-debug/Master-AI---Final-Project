@@ -1,220 +1,110 @@
 # Task Log
 
-## 2026-03-15 - Reubicacion de configuracion analitica de agrupacion
+## 2026-03-23 — Fase H completa: validación pre-normalización + scan comprensivo de datos
 
-- Se removio `ComprehensionPanel` de la etapa `AWAITING_VALIDATION` en `SchemaValidationFlow.tsx`.
-- La validacion temprana de schema quedo enfocada solo en revisar tipos, ajustar roles semanticos y continuar al analisis.
-- Se agrego un aviso en `SchemaValidationFlow.tsx` aclarando que la configuracion de dimensiones para agrupar el dashboard fue movida a una etapa posterior.
-- Se agrego un bloque visible en `VizProposalPanel.tsx` marcando como punto pendiente la futura reconexion de esa preferencia analitica con la seleccion final de visualizaciones.
-- Motivo del cambio:
-  - la seleccion temprana de `q1` estaba adelantada en el flujo
-  - no estaba persistida ni conectada al pipeline real posterior
-  - mezclaba validacion estructural con preferencia analitica
-- Estado actual:
-  - la UI ya no pide esa decision en la etapa de schema
-  - el pendiente quedo explicitado donde luego deberia integrarse correctamente
-- Verificacion:
-  - `npm run build`: OK
+### Lo que se hizo esta sesión
 
-## 2026-03-15 - Corrección de bugs post-rediseño UX (sesión de pruebas en vivo)
+**Fixes al pipeline (bugs detectados al validar H):**
+- `useFileQueue.ts` línea 184: `cleanedData: file.rawData` → `cleanedData: cleanResult.cleanedData ?? null` (root cause de la tab de normalización mostrando datos sin limpiar)
+- `route.ts` acción `apply_cleaning`: agregado `cleanedData: normResult.cleanedData` a la respuesta (el frontend no recibía los datos limpios)
+- `CleanerAgent.ts` bug D-3: removido lowercase automático de strings. Ahora solo se aplica si la cleaning rule lo pide explícitamente. `ORD-1001`, `Customer_Name`, `City`, `Product_ID` ya no se lowercasean.
+- `CleanerAgent.ts` bugs D-4/D-5: reescrita lógica de fechas — `parseDate(value, yearContext)` con soporte para ISO local, YYYYMMDD compacto, slash dd/MM/yyyy, numeric dash, named-month (`feb-26`, `7-feb.`). Pre-scan de formato dominante y año de contexto antes del row loop.
+- `ManagerAgent.ts`: removido `FormatValidatorAgent` de la fase de detección (generaba falsos positivos con `column: '*'`). Reducido `extremeValues` de 5 a 3 por columna.
 
-### Bug: freeze al interactuar con tabla en SchemaValidationFlow
-- Se identificó que `SchemaValidationFlow` recreaba handlers en cada render (sin `useCallback`), causando que `InteractiveSheet` se re-renderizara con todos los datos al menor cambio de estado.
-- Se aplicaron tres fixes:
-  1. `SchemaValidationFlow.tsx`: handlers `handleSchemaOverride`, `handleSubmitAnswers`, `handleChatMessage` envueltos en `useCallback`. Datos sliceados a 50 filas via `useMemo`.
-  2. `useFileQueue.ts` (`runPipelinePhase2`): guard añadido `if (file.status !== 'AWAITING_VALIDATION') return` para evitar doble ejecución.
-  3. `useFileQueue.ts` (`runPipelinePhase1`): guard equivalente ya existía, confirmado.
-- El bug de freeze en la tabla de `InteractiveSheet` (selector de columna tipo `product_name`) quedó **pendiente de verificación** — el usuario interrumpió las pruebas antes de confirmar resolución.
-- Verificación parcial: `npx tsc --noEmit` OK.
+**NormalizationTab visual:**
+- Tema oscuro (`bg-slate-900`), verde en header de columnas corregidas con badge de conteo, celdas corregidas resaltadas en verde con checkmark, celdas vacías en rojo itálico, leyenda, footer con conteo de correcciones.
+- `changedCellMap` (Map O(1)) para lookup eficiente.
 
-### Bug: dots de estado sin color en sidebar
-- `StatusLegend.tsx`: cambiado `size-2` a `w-3 h-3 inline-block` para garantizar visibilidad del círculo.
-- `FileListItem.tsx`: cambiado `size-2.5` a `style={{ width: 10, height: 10, display: 'inline-block' }}` para evitar dependencia de Tailwind v4 en inline span.
+**InteractiveSheet:**
+- Agregada sección "Avisos generales" para issues con `column: '*'` (duplicados, encoding) — el conteo del banner ahora coincide con lo visible.
+- Agregadas props `controlledApprovedIds?: Set<string>` y `onToggleIssue?: (id: string) => void` para modo controlado desde el padre.
+- Reemplazados usos internos de `approvedIssueIds` → `effectiveApprovedIds` y `toggleIssue` → `handleToggle`.
 
-### Mejora: header de archivo en TabbedFileView
-- `TabbedFileView.tsx`: añadido header con nombre de archivo, conteo de filas/columnas y badge "Listo", alineado con el diseño de los mockups del plan original.
-- Se eliminó el nombre de archivo duplicado que estaba dentro del tab bar.
+**Panel de validación pre-normalización (SchemaValidationFlow):**
+- Estado cambiado de `useState<string[]>` a `useState<Set<string>>` como fuente de verdad única.
+- Panel "Problemas Detectados" antes de la tabla: columna, fila, valor original, acción propuesta con valor normalizado real, checkbox, botones "Aprobar todos"/"Ignorar todos", click en fila hace toggle.
+- Conectado con InteractiveSheet en modo controlado — ambos comparten el mismo `approvedSet`.
 
+**Shared utility `dateUtils.ts`:**
+- Creado `datalens-app/src/lib/agents/dateUtils.ts` con: `parseDate`, `formatDateToString`, `detectDominantDateFormat`, `detectMostCommonYear`.
+- `CleanerAgent` actualizado para importar desde `dateUtils` (removidos los 4 métodos privados).
+- `ManagerAgent` también importa `dateUtils` — garantiza que el valor en el preview es exactamente el que produce la normalización.
+- `DetectedIssue` extendido con `normalizedValue?: string`.
 
+**Scan comprensivo de datos en `ManagerAgent.detectIssues()`:**
 
-## 2026-03-14 - Auditoria y limpieza de raiz del proyecto
-- Se audito el contenido completo de `Projecto Final Master IA` con criterio conservador.
-- Se dejo sin tocar lo operativo del proyecto:
-  - `datalens-app`
-  - `brain`
-  - `.git`
-- Se creo `Archived 14.3.2026` y se movio ahi el material no operativo o historico:
-  - prototipos o carpetas vacias (`datalens-mvp`)
-  - extracciones temporales de `.docx` (`DataLens_Extract`, `extracted_docx`, `temp_docx.zip`, scripts `read_docx.*`)
-  - referencias visuales y walkthroughs sueltos (`flujo agente`, imagenes)
-  - tooling externo no conectado al proyecto activo (`skills`, `.cursorrules`)
-  - documentos y assets de referencia no usados por la app activa (`DataLens_AI_Arquitectura_v3 (1).docx`, `UX Design.txt`, `prompt_mejoras_pipeline_v2.md`, `sample_sales_data.csv`, `LOGS`, `DataLens.zip`, `ai_studio_code.py`)
+Antes: solo fechas a nivel de columna (sin `rowIndex`).
+Ahora: scan cell-level para fechas Y números:
 
-## 2026-03-14 - Limpieza y reorganizacion de brain
-- Se audito la carpeta `brain` contra el codigo actual en `datalens-app`.
-- Se movieron a `brain/obsoleto_2026-03-14/` los documentos cuyo contenido ya estaba implementado o superado:
-  - `analisis_agentes_datalens.md`
-  - `diagramas_arquitectura_v3.md`
-  - `implementation_plan.md`
-  - `walkthrough.md`
-- Se dejo `session_handoff.md` solo con pendientes reales verificados.
-- `skills_reference.md` no se modifico.
+| Tipo | Detección | normalizedValue |
+|---|---|---|
+| Fecha | `feb-26`, `20260209`, `7-feb.` | `26/02/2026` (formato dominante del doc) |
+| Fecha | `N/A`, `-` en columna fecha | `(nulo)` |
+| Número | `$1,234.56`, `1.234,50` | `1234.56` |
+| Número | `N/A`, `-` en columna número | `(nulo)` |
+| Número | texto en columna número | `(nulo)` — severity ERROR (pérdida de dato) |
 
-## 2026-03-14 - Correccion de bugs prioritarios del session handoff
-- Se corrigio la limpieza de logs por sesion en `src/app/page.tsx`, enviando `sessionId` y separando correctamente limpieza de sesion anterior vs reset local.
-- `AnalysisPanel.tsx` paso a renderizar markdown con `react-markdown` y `remark-gfm`.
-- `AnalysisPanel.tsx` dejo de disparar `generateAnalysis()` en render y quedo alineado con el sistema de tema light/dark.
-- `VizProposalPanel.tsx` dejo de disparar `loadProposals()` en render.
-- `ComprehensionPanel.tsx` se limpio de imports muertos.
-- `TokenUsageWidget.tsx` reemplazo el icono invalido por uno existente.
-- Verificacion de esa tanda:
-  - `npx eslint` sobre archivos tocados: OK
-  - `npx tsc --noEmit`: OK
-  - `npm run build`: OK
+Deduplicación: issues column-level del profiler se eliminan para columnas que ya tienen cobertura cell-level (evita doble conteo).
 
-## 2026-03-14 - Limpieza global de lint de datalens-app
-- Se corrigieron errores de hooks, dependencias de effects y orden de declaracion en componentes React.
-- Se eliminaron `any` residuales en API, bus de agentes, core de agentes y agentes concretos.
-- Se formalizaron tipos compartidos para mensajes, reportes, schema, chat, visualizaciones y validacion.
-- Se ajusto la configuracion de lint para ignorar scripts auxiliares `test-api*.js` y evitar warnings irrelevantes de layout.
-- Se compatibilizo `DashboardContent` con reportes tipo chart y tipo table sin romper el tipado.
-- Se reforzo `AgentFlowVisualizer` para manejar payloads `unknown` de forma segura.
-- Verificacion final del repo activo:
-  - `npm run lint`: OK
-  - `npx tsc --noEmit`: OK
-  - `npm run build`: OK
+Filtro del panel: `kind === 'format' || kind === 'type_mismatch' || (kind === 'null' && rowIndex !== undefined)`. Outliers excluidos (fase posterior). Issues globales (`column: '*'`) excluidos (van al panel de avisos de InteractiveSheet).
 
-## 2026-03-14 - Outlier highlighting preparado para evolucionar a anomalies persistidas
-- Se agrego el tipo `DataAnomaly` como contrato reutilizable para anomalias de datos.
-- `page.tsx` ahora deriva anomalias locales desde `outlierReport` despues del pipeline de limpieza.
-- `InteractiveSheet.tsx` ahora recibe `anomalies` y resalta:
-  - columnas con alertas
-  - celdas anomalas
-  - contador de anomalias visibles en la grilla
-- La implementacion actual usa fuente local (`outlierReport -> DataAnomaly[]`) pero ya quedo desacoplada del formato del detector.
-- Esto deja listo el camino para migrar a `Supabase/anomalies` sin rehacer la UI.
-- Verificacion:
-  - `npm run lint`: OK
-  - `npx tsc --noEmit`: OK
-  - `npm run build`: OK
-
-## 2026-03-14 - Persistencia de overrides y Schema Blueprint v1
-- Los overrides de `semantic_role` dejaron de quedar solo en memoria local del componente.
-- Se agrego una accion API para guardar overrides de schema por `sessionId`.
-- Los cambios de rol en `InteractiveSheet.tsx` ahora actualizan el backend y refrescan el `schema` desde la respuesta persistida.
-- Se implemento `schema_blueprints` v1 con:
-  - `sessionId`
-  - `version`
-  - `columns`
-  - `type`
-  - `semantic_role`
-  - `domain`
-  - `analysis_variables`
-  - `source`
-  - `updatedAt`
-- Se agregaron helpers para:
-  - `schema -> schemaBlueprint`
-  - `schemaBlueprint -> schema`
-  - aplicar overrides versionados
-- `analyze_schema` ahora crea y guarda un blueprint.
-- cada override incrementa la version del blueprint en la sesion actual.
-- `page.tsx` ya mantiene `schemaBlueprint` en estado y muestra version visible en la UI.
-- Verificacion:
-  - `npm run lint`: OK
-  - `npx tsc --noEmit`: OK
-  - `npm run build`: OK
-
-## 2026-03-14 - Rediseño UX Multi-Archivo
-
-Cambio mayor de interfaz basado en `multi_archivo_tecnico.docx`. Se pasó del wizard secuencial de 6 pasos (single-file) a una interfaz sidebar de archivos + área principal con 5 pestañas de trazabilidad. El backend (route.ts, DataStore, todos los agentes) no fue tocado.
-
-### Archivos nuevos creados
-
-**Capa de estado (`src/lib/`)**
-- `fileQueue.ts` — Tipos `FileStatus`, `FileRecord`, utilidades puras de cola (`canStartProcessing`, `getActiveProcessingCount`, `getNextQueued`, `getReadyFiles`).
-- `csvParser.ts` — `parseCSVFile()` extrae PapaParse como utilidad compartida.
-- `useFileQueue.ts` — Hook central: state machine multi-archivo con `runPipelinePhase1` (clean_data → analyze_schema → AWAITING_VALIDATION) y `runPipelinePhase2` (generate_analysis → propose_visualizations → READY). Queue manager automático via `useEffect` (máx. 2 activos, AWAITING_VALIDATION no cuenta slot).
-- `useMultiChat.ts` — Hook de chat global contra el sessionId del archivo seleccionado.
-
-**Componentes de layout (`src/components/layout/`)**
-- `FileSidebar.tsx` — Sidebar 220px con logo, drop target, lista de archivos, leyenda, TokenUsageWidget y botón Admin.
-- `FileListItem.tsx` — Fila de archivo con dot animado (`dot-*` CSS class), nombre truncado, label de status.
-- `StatusLegend.tsx` — Leyenda de 4 colores en el pie del sidebar.
-- `FileDropTarget.tsx` — Botón "+" + drag-and-drop multi-CSV dentro del sidebar.
-- `GlobalChatBar.tsx` — Barra de chat fija al fondo: hint "Chat global · N archivos disponibles", historial expandible, deshabilitado si no hay archivos READY.
-- `AdminView.tsx` — Vista de admin extraída de page.tsx (AgentTerminal + AgentFlowVisualizer) con botón Volver.
-- `EmptyState.tsx` — Pantalla de bienvenida con drop zone grande cuando no hay archivo seleccionado.
-- `ProcessingSpinner.tsx` — Spinner full-area para estados amarillos con label dinámico.
-- `FileMainArea.tsx` — Router por `file.status`: QUEUED → mensaje, procesando → spinner, AWAITING_VALIDATION → SchemaValidationFlow, READY → TabbedFileView, ERROR → panel con retry/delete.
-- `TabbedFileView.tsx` — 5 pestañas con checkmarks. Tab Dashboard con disclosure progresivo: AnalysisPanel → VizProposalPanel → Dashboard.
-- `SchemaValidationFlow.tsx` — Vista AWAITING_VALIDATION: banner de atención + InteractiveSheet + ComprehensionPanel reutilizados via props.
-- `SchemaTab.tsx` — Tabla del Blueprint (columna, tipo, rol semántico con badge, dominio, fuente AI/Usuario).
-- `NormalizationTab.tsx` — Diff rawData vs cleanedData: badges "Corregido/Limpio" por columna + resumen de transformaciones.
-- `ValidationTab.tsx` — Anomalías agrupadas por tipo con scorecard pass/fail.
-
-### Archivos modificados
-
-- `src/app/page.tsx` — Reescrito: monta `FileSidebar + FileMainArea + GlobalChatBar`. Toda la lógica de estado migrada a `useFileQueue` y `useMultiChat`.
-- `src/app/globals.css` — Clases `.dot-queued`, `.dot-processing`, `.dot-awaiting`, `.dot-ready`, `.dot-error` definidas explícitamente para que Tailwind no las purgue. También `.animate-fade-in`.
-
-### Sin tocar (backend intacto)
-`route.ts`, `DataStore.ts`, todos los agentes (`/lib/agents/**`), `InteractiveSheet`, `AnalysisPanel`, `VizProposalPanel`, `Dashboard`, `DashboardContent`, `AgentTerminal`, `AgentFlowVisualizer`, `TokenUsageWidget`, `ComprehensionPanel`.
-
-### Estado de pipeline multi-archivo
-| Estado | Color dot | Slot cola |
-|--------|-----------|-----------|
-| QUEUED | gris | no |
-| PARSING / SCHEMA_DETECTION / NORMALIZING / VALIDATING | amarillo pulse | sí (máx 2) |
-| AWAITING_VALIDATION | rojo pulse | **no** (pausado) |
-| READY | verde | no |
-| ERROR | rojo fijo | no |
-
-### Verificación
-- `npx tsc --noEmit`: OK (cero errores)
+**Resultado:** `npx tsc --noEmit` sin errores.
 
 ---
 
-## Implementaciones ya presentes en el codigo
+### Pendientes identificados esta sesión
 
-### Arquitectura y agentes
-- Core de agentes separado en `src/lib/agents/core/`.
-- `AgentBase` ya expone `id`, `type`, `tenantId`, `execute()` y `communicate()`.
-- `AgentRegistry` y `AgentLogger` ya existen y se usan en los agentes.
-- `AgentBus.unsubscribe()` ya existe y `dispose()` lo invoca para limpiar suscripciones.
-- El `ManagerAgent` ya orquesta limpieza, schema, analisis, visualizacion, chat y dashboard final.
+1. **CleanerAgent no usa `approvedIssueIds`** (`_approvedIssueIds` ignorado) — el checkbox "ignorar" no tiene efecto en la normalización real. Hay que pasarlo a `applyColumnCleaning` para saltear celdas no aprobadas por `rowIndex`.
 
-### Fases implementadas
-- Fase 1: pipeline de limpieza con `FileInspectorAgent`, `ProfilerAgent`, `CleanerAgent`, `DuplicateDetectorAgent`, `FormatValidatorAgent`, `OutlierDetectorAgent` e `IntegrityAuditorAgent`.
-- Fase 2: schema enriquecido con `semantic_role` y preguntas de comprension.
-- Fase 3: flujo con `SpecialistAgent`, `ValidatorAgent`, fallback a `ReportAgent`, propuestas de visualizacion y auditoria final.
+2. **Fase de outliers sin diseño** — el usuario pidió que outliers aparezcan "después" de la validación de formato. No hay pantalla ni flujo definido para eso.
 
-### Mejoras ya implementadas
-- Historial de logs aislado por sesion.
-- `full_pipeline` disponible en la API.
-- Chat con SQL real via `better-sqlite3` y `SQLiteService`.
-- `TokenTracker` y endpoint `/api/admin/tokens`.
-- `ErrorTranslator` para mensajes comprensibles.
-- Helper DRY `extractColumnsByType(schema)` compartido por `ComprehensionAgent` y `ReportAgent`.
+---
 
-## Registro historico consolidado
+## 2026-03-19 — Reorganización completa del proyecto y plan de arquitectura de producción
 
-### 2026-03-04
-- Logs aislados por sesion.
-- Pipeline encadenado (`full_pipeline`).
-- Chat con SQL real.
-- Analisis obligatorio antes del dashboard.
-- Traduccion de errores amigable.
+- Se leyeron todos los documentos activos de `brain/`.
+- Se definió la arquitectura de producción objetivo: **Frontend (Vercel) + Backend Express (Railway) + Supabase** en un monorepo con carpetas `frontend/` y `backend/`.
+- Se documentó el plan de migración completo en `brain/arquitectura_produccion_2026-03-19.md` con 6 fases (A-F), schema de Supabase, variables de entorno y criterios de éxito.
+- Se consolidaron todos los pendientes (bugs, prompts, features) en `brain/session_handoff.md` con sistema de prioridades.
 
-### 2026-03-05
-- Redesign general de UI.
-- Ajuste de modelos LLM hacia Gemini 2.5.
+---
 
-### 2026-03-07
-- Fix de modelos LLM.
+## 2026-03-19 — Plan de externalización de prompts a Markdown (pendiente de ejecución)
+
+- Gap identificado: los prompts LLM están hardcodeados en TypeScript.
+- Se diseñó el plan completo en `brain/implementation_plan_prompts_externalization_2026-03-19.md`.
+- Inventario: 9 prompts en 6 agentes a externalizar.
+- **Estado: plan aprobado, ejecución pendiente (Fase E).**
+
+---
+
+## 2026-03-15 — Corrección de bugs post-rediseño UX
+
+- Fix freeze en `InteractiveSheet`: handlers envueltos en `useCallback`, datos sliceados a 50 filas, guard en `runPipelinePhase2`. **Pendiente confirmar resolución.**
+- Fix dots de estado en sidebar (`inline-block` explícito).
+- Header de archivo en `TabbedFileView` con nombre, filas, columnas y badge "Listo".
+- Reubicación de `ComprehensionPanel` fuera de `SchemaValidationFlow`.
+
+---
+
+## 2026-03-14 — Rediseño UX Multi-Archivo
+
+- Pasó del wizard secuencial de 6 pasos a sidebar de archivos + área principal con 5 pestañas.
+- Nuevos archivos: `fileQueue.ts`, `csvParser.ts`, `useFileQueue.ts`, `FileSidebar.tsx`, `FileListItem.tsx`, `FileDropTarget.tsx`, `SchemaValidationFlow.tsx`, `NormalizationTab.tsx`, etc.
+- Backend intacto (route.ts, DataStore, agentes).
+
+---
+
+## 2026-03-14 — Limpieza global de lint, bugs prioritarios y persistencia de schema
+
+- Lint global: `npm run lint` OK, `npx tsc --noEmit` OK, `npm run build` OK.
+- `schema_blueprints` v1 implementado in-memory por sesión.
+- `DataAnomaly` desacoplada del detector.
+
+---
+
+## Registro histórico (2026-03-04 a 2026-03-07)
+- Logs aislados por sesión, pipeline encadenado (`full_pipeline`), chat con SQL real.
+- Análisis obligatorio antes del dashboard, traducción de errores amigable.
 - Token tracking con costo estimado.
-- Reescritura del prompt de `AnalystAgent`.
-- Tabla de estructura detectada en analisis.
-- Outlier summary enriquecido.
-- Redesign de `AgentFlowVisualizer`.
-- Sanitizacion de datos en dashboard.
-- Auditoria end-to-end documentada.
+- Reescritura del prompt de `AnalystAgent`, redesign de `AgentFlowVisualizer`.

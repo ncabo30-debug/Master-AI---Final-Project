@@ -35,7 +35,8 @@ export default function FileMainArea({ file, queue }: FileMainAreaProps) {
 
   // Processing states (yellow)
   if (
-    file.status === 'PARSING' ||
+    file.status === 'DETECTING' ||
+    file.status === 'CLEANING' ||
     file.status === 'SCHEMA_DETECTION' ||
     file.status === 'NORMALIZING' ||
     file.status === 'VALIDATING'
