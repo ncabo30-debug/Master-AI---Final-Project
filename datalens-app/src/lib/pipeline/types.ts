@@ -195,4 +195,5 @@ export interface BlueprintGenerationResult {
   draftBlueprint: NormalizationBlueprint;
   preview: BlueprintPreview;
   derivedSchema: SchemaMap;
+  llmSample: Record<string, unknown>[];
 }

@@ -20,6 +20,19 @@ function removeRows(sheet: RawSheet, rowIndexes: number[]): RawSheet {
   };
 }
 
+function getRowIndexes(params: Record<string, unknown>): number[] {
+  const candidate =
+    (params.rowIndexes as number[] | undefined) ??
+    (params.row_indexes as number[] | undefined) ??
+    (params.row_numbers as number[] | undefined) ??
+    (params.rows as number[] | undefined) ??
+    [];
+
+  return candidate
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0);
+}
+
 function collapseHeaderRows(sheet: RawSheet, rowIndexes: number[]): RawSheet {
   if (rowIndexes.length === 0) return sheet;
   const indexes = [...rowIndexes].sort((left, right) => left - right);
@@ -74,7 +87,7 @@ export function executeStructuralPlan(workbook: RawWorkbook, plan: StructuralAct
 
   plan.filter((step) => step.enabled).forEach((step) => {
     if (step.action === 'remove_rows') {
-      primarySheet = removeRows(primarySheet, (step.params.rowIndexes as number[] | undefined) ?? []);
+      primarySheet = removeRows(primarySheet, getRowIndexes(step.params));
     }
 
     if (step.action === 'drop_subtotals') {
@@ -86,7 +99,7 @@ export function executeStructuralPlan(workbook: RawWorkbook, plan: StructuralAct
     }
 
     if (step.action === 'collapse_multi_row_headers') {
-      primarySheet = collapseHeaderRows(primarySheet, (step.params.rowIndexes as number[] | undefined) ?? []);
+      primarySheet = collapseHeaderRows(primarySheet, getRowIndexes(step.params));
     }
   });
 
@@ -104,4 +117,3 @@ export function executeStructuralPlan(workbook: RawWorkbook, plan: StructuralAct
     cleanedRows: buildRowsFromSheet(primarySheet, headerRowIndex),
   };
 }
-

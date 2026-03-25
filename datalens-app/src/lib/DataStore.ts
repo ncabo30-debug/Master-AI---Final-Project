@@ -7,6 +7,7 @@ import type {
     NormalizationBlueprint,
     RawWorkbook,
     StatisticalProfile,
+    StructuralDiagnosis,
     ValidationReport,
 } from './pipeline/types';
 
@@ -24,6 +25,7 @@ interface StoredSession {
     schemaBlueprint?: SchemaBlueprint;
     draftBlueprint?: NormalizationBlueprint;
     approvedBlueprint?: NormalizationBlueprint;
+    diagnosis?: StructuralDiagnosis;
     questions?: QuestionOption[];
     analysis?: string;
     vizProposals?: VizProposal[];
@@ -126,6 +128,7 @@ export function storeData(sessionId: string, data: Record<string, unknown>[]): s
         schemaBlueprint: existing?.schemaBlueprint,
         draftBlueprint: existing?.draftBlueprint,
         approvedBlueprint: existing?.approvedBlueprint,
+        diagnosis: existing?.diagnosis,
         questions: existing?.questions,
         issueReport: existing?.issueReport,
         workbook: existing?.workbook,
@@ -243,6 +246,7 @@ export function storeBlueprintSession(args: {
     originalData: Record<string, unknown>[];
     statisticalProfile: StatisticalProfile;
     draftBlueprint: NormalizationBlueprint;
+    diagnosis: StructuralDiagnosis;
     schema: SchemaMap;
     normalizedPreview: Record<string, unknown>[];
     originalFileBase64: string;
@@ -259,6 +263,7 @@ export function storeBlueprintSession(args: {
         statisticalProfile: args.statisticalProfile,
         profile: toLegacyProfile(args.statisticalProfile),
         draftBlueprint: args.draftBlueprint,
+        diagnosis: args.diagnosis,
         schema: args.schema,
         normalizedPreview: args.normalizedPreview,
         ts: Date.now(),
@@ -310,6 +315,10 @@ export function getDraftBlueprint(sessionId: string): NormalizationBlueprint | n
 
 export function getApprovedBlueprint(sessionId: string): NormalizationBlueprint | null {
     return readSession(sessionId)?.approvedBlueprint || null;
+}
+
+export function getDiagnosis(sessionId: string): StructuralDiagnosis | null {
+    return readSession(sessionId)?.diagnosis || null;
 }
 
 export function getOriginalFileBase64(sessionId: string): string | null {

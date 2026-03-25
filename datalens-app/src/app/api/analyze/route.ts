@@ -5,6 +5,7 @@ import {
   generateSessionId,
   getApprovedBlueprint,
   getData,
+  getDiagnosis,
   getDraftBlueprint,
   getManifest,
   getNormalizedExportBase64,
@@ -69,6 +70,7 @@ export async function POST(req: Request) {
         originalData: result.preview.originalPreview,
         statisticalProfile: result.profile,
         draftBlueprint: result.draftBlueprint,
+        diagnosis: result.diagnosis,
         schema: result.derivedSchema,
         normalizedPreview: result.preview.normalizedPreview,
         originalFileBase64,
@@ -125,6 +127,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         sessionId,
+        diagnosis: getDiagnosis(sessionId),
         draftBlueprint: nextBlueprint,
         schema: blueprintToSchema(nextBlueprint),
         preview,
@@ -184,6 +187,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         sessionId,
         manifest: getManifest(sessionId),
+        diagnosis: getDiagnosis(sessionId),
         draftBlueprint: getDraftBlueprint(sessionId),
         approvedBlueprint: getApprovedBlueprint(sessionId),
         validationReport: getValidationReport(sessionId),

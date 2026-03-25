@@ -9,6 +9,7 @@ import {
   getReadyFiles,
 } from './fileQueue';
 import { parseSpreadsheetFile } from './pipeline/ingestion';
+import { buildOriginalPreviewRows } from './pipeline/preview';
 import type { ColumnNormalizationPlan, NormalizationBlueprint } from './pipeline/types';
 import type { EnrichedSchemaField, VizProposal } from './agents/types';
 
@@ -72,6 +73,7 @@ export function useFileQueue() {
           normalizedPreview: result.preview?.normalizedPreview ?? null,
           draftBlueprint: result.draftBlueprint,
           approvedBlueprint: result.draftBlueprint,
+          diagnosis: result.diagnosis ?? null,
           schema: result.schema,
           statisticalProfile: result.profile,
           status: 'AWAITING_APPROVAL',
@@ -155,16 +157,9 @@ export function useFileQueue() {
     for (const file of supportedFiles) {
       try {
         const parsed = await parseSpreadsheetFile(file);
-        const firstSheetRows =
-          parsed.workbook.sheets[0]?.rawRows.slice(1).map((row) =>
-            (parsed.workbook.sheets[0]?.rawRows[0] ?? []).reduce<Record<string, unknown>>((acc, header, index) => {
-              acc[header || `column_${index + 1}`] = row[index] ?? '';
-              return acc;
-            }, {})
-          ) ?? [];
 
         newRecords.push(
-          createFileRecord(file.name, firstSheetRows, {
+          createFileRecord(file.name, buildOriginalPreviewRows(parsed.workbook), {
             workbook: parsed.workbook,
             originalFileBase64: parsed.originalFileBase64,
           })
@@ -215,7 +210,9 @@ export function useFileQueue() {
       patchFile(fileId, {
         draftBlueprint: result.draftBlueprint,
         approvedBlueprint: result.draftBlueprint,
+        diagnosis: result.diagnosis ?? file.diagnosis,
         schema: result.schema,
+        rawData: result.preview?.originalPreview ?? file.rawData,
         normalizedPreview: result.preview?.normalizedPreview ?? file.normalizedPreview,
       });
     },
@@ -237,7 +234,9 @@ export function useFileQueue() {
       patchFile(fileId, {
         draftBlueprint: result.draftBlueprint,
         approvedBlueprint: result.draftBlueprint,
+        diagnosis: result.diagnosis ?? file.diagnosis,
         schema: result.schema,
+        rawData: result.preview?.originalPreview ?? file.rawData,
         normalizedPreview: result.preview?.normalizedPreview ?? file.normalizedPreview,
       });
     },
@@ -380,4 +379,3 @@ export function useFileQueue() {
     },
   };
 }
-

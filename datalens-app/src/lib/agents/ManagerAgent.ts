@@ -79,7 +79,7 @@ export class ManagerAgent extends AgentBase {
 
             const diagnosis = await schemaA.analyzeStructure(
                 heuristicResult.profile,
-                heuristicResult.preview.originalPreview
+                heuristicResult.llmSample
             );
 
             const structuralResult = executeStructuralPlan(args.workbook, diagnosis.plan_limpieza);

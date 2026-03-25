@@ -28,6 +28,18 @@ export class LLMService {
         return new GoogleGenerativeAI(apiKey);
     }
 
+    private static isTruthy(value: string | undefined): boolean {
+        return /^(1|true|yes|on)$/i.test(value ?? '');
+    }
+
+    private static getConfiguredFlashModel(): string {
+        return process.env.GEMINI_MODEL_FLASH?.trim() || 'gemini-2.5-flash';
+    }
+
+    private static getConfiguredProModel(): string {
+        return process.env.GEMINI_MODEL_PRO?.trim() || 'gemini-2.5-pro';
+    }
+
     private static extractJSON(content: string): string {
         const cleaned = content
             .replace(/```json/gi, '')
@@ -65,16 +77,71 @@ export class LLMService {
 
     private static getModelName(modelType: 'flash' | 'pro'): string {
         if (modelType === 'pro') {
-            return 'gemini-2.5-pro';
+            if (this.isTruthy(process.env.GEMINI_DISABLE_PRO)) {
+                return this.getConfiguredFlashModel();
+            }
+            return this.getConfiguredProModel();
         }
-        return 'gemini-2.5-flash';
+        return this.getConfiguredFlashModel();
+    }
+
+    private static shouldFallbackToFlash(error: Error, modelType: 'flash' | 'pro', attemptedModel: string): boolean {
+        if (modelType !== 'pro') {
+            return false;
+        }
+
+        const flashModel = this.getConfiguredFlashModel();
+        if (attemptedModel === flashModel) {
+            return false;
+        }
+
+        const message = error.message.toLowerCase();
+        return (
+            message.includes('403') ||
+            message.includes('404') ||
+            message.includes('429') ||
+            message.includes('permission') ||
+            message.includes('quota') ||
+            message.includes('rate limit') ||
+            message.includes('resource_exhausted') ||
+            message.includes('not found') ||
+            message.includes('unsupported')
+        );
+    }
+
+    private static async generateWithModel(prompt: string, agentId: string, modelName: string): Promise<string> {
+        const client = this.getGenAIClient();
+        const model = client.getGenerativeModel({ model: modelName });
+        const startTime = Date.now();
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        const content = response.text().trim();
+
+        const usage = response.usageMetadata;
+        const inputTokens = usage?.promptTokenCount ?? 0;
+        const candidateTokens = usage?.candidatesTokenCount ?? 0;
+        const thinkingTokens = 'thoughtsTokenCount' in (usage ?? {})
+            ? Number((usage as unknown as Record<string, unknown>).thoughtsTokenCount ?? 0)
+            : 0;
+        const outputTokens = candidateTokens + thinkingTokens;
+
+        if (inputTokens > 0 || outputTokens > 0) {
+            TokenTracker.record(
+                this.currentSessionId,
+                agentId,
+                modelName,
+                inputTokens,
+                outputTokens
+            );
+            console.log(`[TokenTracker] ${agentId} | ${modelName} | in:${inputTokens} out:${candidateTokens}+think:${thinkingTokens}=${outputTokens}`);
+        }
+
+        AgentLogger.logLLMCall(agentId, prompt, content, Date.now() - startTime);
+        return content;
     }
 
     private static async fetchLLM(prompt: string, agentId: string, modelType: 'flash' | 'pro' = 'flash'): Promise<string> {
-        const client = this.getGenAIClient();
         const modelName = this.getModelName(modelType);
-        const model = client.getGenerativeModel({ model: modelName });
-
         let lastError: Error = new Error('LLM call failed with no attempts.');
 
         for (let attempt = 0; attempt <= this.MAX_RETRIES; attempt++) {
@@ -84,38 +151,20 @@ export class LLMService {
                 await new Promise(r => setTimeout(r, delay));
             }
 
-            const startTime = Date.now();
-
             try {
-                const result = await model.generateContent(prompt);
-                const response = result.response;
-                const content = response.text().trim();
-
-                // Extract and record token usage
-                const usage = response.usageMetadata;
-                const inputTokens = usage?.promptTokenCount ?? 0;
-                // Gemini 2.5 thinking models separate thinking tokens from candidate tokens
-                const candidateTokens = usage?.candidatesTokenCount ?? 0;
-                const thinkingTokens = 'thoughtsTokenCount' in (usage ?? {})
-                    ? Number((usage as unknown as Record<string, unknown>).thoughtsTokenCount ?? 0)
-                    : 0;
-                const outputTokens = candidateTokens + thinkingTokens;
-
-                if (inputTokens > 0 || outputTokens > 0) {
-                    TokenTracker.record(
-                        this.currentSessionId,
-                        agentId,
-                        modelName,
-                        inputTokens,
-                        outputTokens
-                    );
-                    console.log(`[TokenTracker] ${agentId} | ${modelName} | in:${inputTokens} out:${candidateTokens}+think:${thinkingTokens}=${outputTokens}`);
-                }
-
-                AgentLogger.logLLMCall(agentId, prompt, content, Date.now() - startTime);
-                return content;
+                return await this.generateWithModel(prompt, agentId, modelName);
             } catch (err: unknown) {
                 lastError = err instanceof Error ? err : new Error(String(err));
+
+                if (this.shouldFallbackToFlash(lastError, modelType, modelName)) {
+                    const flashModel = this.getConfiguredFlashModel();
+                    console.warn(`[LLMService] Falling back from ${modelName} to ${flashModel} for agent ${agentId}.`);
+                    try {
+                        return await this.generateWithModel(prompt, agentId, flashModel);
+                    } catch (fallbackErr: unknown) {
+                        lastError = fallbackErr instanceof Error ? fallbackErr : new Error(String(fallbackErr));
+                    }
+                }
 
                 // Do not retry on 4xx Authentication/Permission errors
                 if (lastError.message.includes('403') || lastError.message.includes('401')) {

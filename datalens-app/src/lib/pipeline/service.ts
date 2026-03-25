@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { buildHeuristicBlueprint, buildHeuristicStructuralDiagnosis, blueprintToSchema } from './blueprint';
 import { exportRowsToXlsxBase64 } from './export';
 import { buildDeterministicSample, profileWorkbook } from './profiling';
+import { buildOriginalPreviewRows } from './preview';
 import { executeStructuralPlan } from '@/lib/transformations/structuralExecutor';
 import { executeColumnBlueprint } from '@/lib/transformations/executor';
 import { LocalDatasetRepository } from './repositories';
@@ -52,7 +53,7 @@ export function buildBlueprintPreview(
   );
 
   return {
-    originalPreview: structuralResult.cleanedRows.slice(0, 50),
+    originalPreview: buildOriginalPreviewRows(workbook),
     normalizedPreview,
   };
 }
@@ -78,10 +79,11 @@ export async function generateBlueprintPipeline(args: {
     diagnosis,
     draftBlueprint,
     preview: {
-      originalPreview: buildDeterministicSample(primaryRows, 50),
+      originalPreview: buildOriginalPreviewRows(args.workbook),
       normalizedPreview: preview.normalizedPreview,
     },
     derivedSchema: blueprintToSchema(draftBlueprint),
+    llmSample: buildDeterministicSample(primaryRows, 50),
   };
 }
 
@@ -122,4 +124,3 @@ export async function executeBlueprintPipeline(args: {
     normalizedExportBase64,
   };
 }
-

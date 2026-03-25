@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DataLens App
 
-## Getting Started
+Aplicación Next.js para ingesta, profiling, blueprint de normalización, validación humana y análisis sobre datasets tabulares.
 
-First, run the development server:
+## Levantar el proyecto
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+La app queda disponible en `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Variables de entorno
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Usá `.env.example` como referencia.
 
-## Learn More
+Variables relevantes para Gemini:
 
-To learn more about Next.js, take a look at the following resources:
+- `GEMINI_API_KEY`: API key de Google AI Studio.
+- `GEMINI_MODEL_FLASH`: modelo base para llamadas rápidas. Default: `gemini-2.5-flash`.
+- `GEMINI_MODEL_PRO`: modelo para llamadas más complejas. Default: `gemini-2.5-pro`.
+- `GEMINI_DISABLE_PRO`: si vale `true`, todas las llamadas internas marcadas como `pro` se degradan automáticamente a `flash`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Recomendación para API gratuita de Gemini
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+La app hoy usa por default:
 
-## Deploy on Vercel
+- `gemini-2.5-flash`
+- `gemini-2.5-pro`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Ambos modelos existen actualmente en la Gemini Developer API y tienen free tier, pero `pro` tiene cuotas bastante más chicas que `flash`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Si vas a trabajar con una key gratuita, la configuración más segura es:
+
+```env
+GEMINI_MODEL_FLASH=gemini-2.5-flash
+GEMINI_MODEL_PRO=gemini-2.5-pro
+GEMINI_DISABLE_PRO=true
+```
+
+Con eso:
+
+- el código no cambia;
+- las llamadas que hoy piden `pro` pasan a usar `flash`;
+- evitás problemas por cuotas bajas o permisos más restrictivos en free tier.
+
+Además, si una llamada `pro` falla por permisos, cuota o modelo no disponible, `LLMService` ahora intenta fallback automático a `flash`.
+
+## Nota sobre SDK
+
+El proyecto sigue usando `@google/generative-ai`, que es el SDK legado. Google actualmente recomienda migrar a `@google/genai`, pero no era necesario para resolver compatibilidad básica de modelos y quotas.
+
+## Verificación rápida
+
+```bash
+npm run build
+```

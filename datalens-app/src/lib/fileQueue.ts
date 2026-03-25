@@ -20,6 +20,7 @@ import type {
   NormalizationBlueprint,
   RawWorkbook,
   StatisticalProfile,
+  StructuralDiagnosis,
   ValidationReport,
 } from './pipeline/types';
 
@@ -96,6 +97,7 @@ export interface FileRecord {
   schemaBlueprint:  SchemaBlueprint | null;
   draftBlueprint:   NormalizationBlueprint | null;
   approvedBlueprint: NormalizationBlueprint | null;
+  diagnosis:        StructuralDiagnosis | null;
   statisticalProfile: StatisticalProfile | null;
   validationReport: ValidationReport | null;
   questions:        QuestionOption[] | null;
@@ -143,6 +145,7 @@ export function createFileRecord(
     schemaBlueprint:  null,
     draftBlueprint:   null,
     approvedBlueprint: null,
+    diagnosis:        null,
     statisticalProfile: null,
     validationReport: null,
     questions:        null,
