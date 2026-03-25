@@ -3,6 +3,26 @@
 
 ---
 
+## Update — 2026-03-25 | Estado después del refactor del pipeline
+
+- El pipeline nuevo de 9 fases ya quedó implementado localmente dentro de `datalens-app/`.
+- Ya existe flujo real de:
+  - `generate_blueprint`
+  - `save_blueprint_override`
+  - `execute_blueprint_and_save`
+- Ya existe review humana con AG Grid y el dataset normalizado pasó a ser la única fuente de verdad para análisis posteriores.
+- **Importante:** esta arquitectura de producción sigue vigente porque **Supabase todavía no está conectado de verdad**.
+- Hoy existen adapters y contratos para Supabase, pero la persistencia real todavía corre localmente.
+- El próximo paso técnico para alinear código y arquitectura es conectar:
+  - metadata tables
+  - tablas dinámicas por dataset
+  - Storage para original + export normalizado
+  - SQL/RPC reales
+
+> Si querés, el siguiente paso natural es que te deje armada también la capa SQL/RPC de Supabase con los CREATE TABLE, metadata tables y funciones rpc listas para enchufar.
+
+---
+
 ## 🏗️ Arquitectura objetivo
 
 ```

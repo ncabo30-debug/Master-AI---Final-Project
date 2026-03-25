@@ -14,53 +14,63 @@ import type {
   IssueReport,
   ReconciliationReport,
 } from './agents/types';
+import type {
+  BlueprintPreview,
+  DatasetManifest,
+  NormalizationBlueprint,
+  RawWorkbook,
+  StatisticalProfile,
+  ValidationReport,
+} from './pipeline/types';
 
 // ── File pipeline states ───────────────────────────────────
 
 export type FileStatus =
   | 'QUEUED'
-  | 'DETECTING'
-  | 'AWAITING_VALIDATION'
-  | 'CLEANING'
-  | 'SCHEMA_DETECTION'
-  | 'NORMALIZING'
-  | 'VALIDATING'
+  | 'PROFILING'
+  | 'BLUEPRINT_READY'
+  | 'AWAITING_APPROVAL'
+  | 'EXECUTING_BLUEPRINT'
+  | 'PERSISTING'
+  | 'SQL_VALIDATING'
   | 'READY'
+  | 'VALIDATION_FAILED'
   | 'ERROR';
 
 /** States that occupy a processing slot (max 2 concurrent). */
 const ACTIVE_STATES: FileStatus[] = [
-  'DETECTING',
-  'CLEANING',
-  'SCHEMA_DETECTION',
-  'NORMALIZING',
-  'VALIDATING',
+  'PROFILING',
+  'EXECUTING_BLUEPRINT',
+  'PERSISTING',
+  'SQL_VALIDATING',
 ];
 
 // ── UI label / dot class mappings ─────────────────────────
 
 export const FILE_STATUS_LABEL: Record<FileStatus, string> = {
   QUEUED:               'En cola',
-  DETECTING:            'Detectando problemas...',
-  AWAITING_VALIDATION:  'Requiere atención',
-  CLEANING:             'Normalizando datos...',
-  SCHEMA_DETECTION:     'Detectando esquema...',
-  NORMALIZING:          'Normalizando datos...',
-  VALIDATING:           'Validando...',
+  PROFILING:            'Generando blueprint...',
+  BLUEPRINT_READY:      'Blueprint listo',
+  AWAITING_APPROVAL:    'Esperando aprobación',
+  EXECUTING_BLUEPRINT:  'Ejecutando blueprint...',
+  PERSISTING:           'Persistiendo dataset...',
+  SQL_VALIDATING:       'Validando con SQL...',
   READY:                'Listo',
+  VALIDATION_FAILED:    'Validación fallida',
   ERROR:                'Error',
 };
 
 /** CSS class for the status dot. Defined as explicit strings so Tailwind never purges them. */
 export const FILE_STATUS_DOT_CLASS: Record<FileStatus, string> = {
   QUEUED:               'dot-queued',
-  DETECTING:            'dot-processing',
-  AWAITING_VALIDATION:  'dot-awaiting',
-  CLEANING:             'dot-processing',
-  SCHEMA_DETECTION:     'dot-processing',
-  NORMALIZING:          'dot-processing',
-  VALIDATING:           'dot-processing',
+  PROFILING:            'dot-processing',
+  BLUEPRINT_READY:      'dot-awaiting',
+  AWAITING_APPROVAL:    'dot-awaiting',
+  EXECUTING_BLUEPRINT:  'dot-processing',
+  PERSISTING:           'dot-processing',
+  SQL_VALIDATING:       'dot-processing',
   READY:                'dot-ready',
+  VALIDATION_FAILED:    'dot-error',
   ERROR:                'dot-error',
 };
 
@@ -73,12 +83,21 @@ export interface FileRecord {
   fileName:         string;
   sessionId:        string | null;
   status:           FileStatus;
+  workbook:         RawWorkbook | null;
+  manifest:         DatasetManifest | null;
   /** Raw rows parsed from the CSV (before any cleaning). */
   rawData:          Record<string, unknown>[] | null;
+  originalFileBase64: string | null;
   /** Rows returned by the apply_cleaning API action. */
   cleanedData:      Record<string, unknown>[] | null;
+  normalizedPreview: Record<string, unknown>[] | null;
+  normalizedData:   Record<string, unknown>[] | null;
   schema:           SchemaMap | null;
   schemaBlueprint:  SchemaBlueprint | null;
+  draftBlueprint:   NormalizationBlueprint | null;
+  approvedBlueprint: NormalizationBlueprint | null;
+  statisticalProfile: StatisticalProfile | null;
+  validationReport: ValidationReport | null;
   questions:        QuestionOption[] | null;
   analysis:         string | null;
   analysisApproved: boolean;
@@ -102,17 +121,30 @@ function generateId(): string {
 
 export function createFileRecord(
   fileName: string,
-  rawData: Record<string, unknown>[]
+  rawData: Record<string, unknown>[],
+  extras?: {
+    workbook?: RawWorkbook | null;
+    originalFileBase64?: string | null;
+  }
 ): FileRecord {
   return {
     fileId:           generateId(),
     fileName,
     sessionId:        null,
     status:           'QUEUED',
+    workbook:         extras?.workbook ?? null,
+    manifest:         null,
     rawData,
+    originalFileBase64: extras?.originalFileBase64 ?? null,
     cleanedData:      null,
+    normalizedPreview: null,
+    normalizedData:   null,
     schema:           null,
     schemaBlueprint:  null,
+    draftBlueprint:   null,
+    approvedBlueprint: null,
+    statisticalProfile: null,
+    validationReport: null,
     questions:        null,
     analysis:         null,
     analysisApproved: false,
@@ -122,7 +154,7 @@ export function createFileRecord(
     issueReport:      null,
     reconciliationReport: null,
     auditPassed:      null,
-    activeTab:        'dashboard',
+    activeTab:        'original',
     error:            null,
   };
 }

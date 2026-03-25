@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { parseCSVFile } from '@/lib/csvParser';
 
 interface EmptyStateProps {
   onAddFiles: (files: File[]) => void;
@@ -13,7 +12,7 @@ export default function EmptyState({ onAddFiles }: EmptyStateProps) {
 
   const handleFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
-    const files = Array.from(fileList).filter((f) => f.name.endsWith('.csv'));
+    const files = Array.from(fileList).filter((f) => /\.(csv|xlsx|xls)$/i.test(f.name));
     if (files.length > 0) onAddFiles(files);
   };
 
@@ -39,7 +38,7 @@ export default function EmptyState({ onAddFiles }: EmptyStateProps) {
           ref={inputRef}
           type="file"
           multiple
-          accept=".csv"
+          accept=".csv,.xlsx,.xls"
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
@@ -49,12 +48,12 @@ export default function EmptyState({ onAddFiles }: EmptyStateProps) {
         </div>
 
         <div>
-          <p className="text-xl font-bold text-slate-100">Sube tus archivos CSV</p>
+          <p className="text-xl font-bold text-slate-100">Sube tus archivos de datos</p>
           <p className="text-sm text-slate-500 mt-1">
             Arrastra uno o varios archivos aquí, o haz clic para explorar
           </p>
           <p className="text-xs text-slate-600 mt-2">
-            Máx. 10 MB por archivo · Hasta 10 archivos · Formato: CSV
+            Máx. 10 MB por archivo · Hasta 10 archivos · Formatos: CSV, XLSX, XLS
           </p>
         </div>
 

@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "ag-grid-community/styles/ag-grid.css";
+@import "ag-grid-community/styles/ag-theme-alpine.css";
 
 @theme {
   --color-primary: #135bec;
@@ -69,4 +71,18 @@
 
 .animate-fade-in {
   animation: animate-fade-in 0.25s ease-out both;
+}
+
+.ag-theme-alpine-dark {
+  --ag-background-color: #101622;
+  --ag-header-background-color: #192233;
+  --ag-odd-row-background-color: #131d2d;
+  --ag-border-color: #232f48;
+  --ag-foreground-color: #e2e8f0;
+  --ag-secondary-foreground-color: #94a3b8;
+  --ag-header-foreground-color: #cbd5e1;
+  --ag-selected-row-background-color: rgba(19, 91, 236, 0.18);
+  --ag-row-hover-color: rgba(19, 91, 236, 0.08);
+  --ag-font-size: 12px;
+  --ag-font-family: var(--font-display);
 }

@@ -42,7 +42,7 @@ export default function SchemaValidationFlow({ file, queue }: SchemaValidationFl
   );
 
   const handleConfirmAndClean = useCallback(() => {
-    queue.confirmAndClean(fileId, Array.from(approvedSet));
+    queue.confirmAndClean(fileId);
   }, [queue, fileId, approvedSet]);
 
   // H-8: Show rawData (original) — not cleanedData

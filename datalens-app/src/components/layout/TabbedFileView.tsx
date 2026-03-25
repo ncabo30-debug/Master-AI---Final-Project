@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { FileRecord, ActiveTab } from '@/lib/fileQueue';
+import type { ActiveTab, FileRecord } from '@/lib/fileQueue';
 import type { UseFileQueueReturn } from '@/lib/useFileQueue';
 import type { VizProposal } from '@/lib/agents/types';
 import InteractiveSheet from '@/components/InteractiveSheet';
@@ -28,18 +28,16 @@ export default function TabbedFileView({ file, queue }: TabbedFileViewProps) {
   const [isDashboardLoading, setIsDashboardLoading] = useState(false);
 
   const tabs: Tab[] = [
-    { id: 'original',      label: 'Archivo original', icon: 'table_view',     hasData: !!file.rawData },
-    { id: 'schema',        label: 'Esquema',           icon: 'schema',         hasData: !!file.schemaBlueprint },
-    { id: 'normalization', label: 'Normalización',     icon: 'auto_fix_high',  hasData: !!file.cleanedData },
-    { id: 'validation',    label: 'Validación',        icon: 'verified_user',  hasData: true },
-    { id: 'dashboard',     label: 'Dashboard',         icon: 'dashboard',      hasData: !!file.analysis },
+    { id: 'original', label: 'Archivo original', icon: 'table_view', hasData: !!file.rawData },
+    { id: 'schema', label: 'Blueprint', icon: 'schema', hasData: !!file.draftBlueprint },
+    { id: 'normalization', label: 'Normalización', icon: 'auto_fix_high', hasData: !!file.normalizedData },
+    { id: 'validation', label: 'Validación', icon: 'verified_user', hasData: !!file.validationReport },
+    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', hasData: !!file.analysis },
   ];
 
   const activeTab = file.activeTab ?? 'dashboard';
-
-  const handleTabChange = (tab: ActiveTab) => {
-    queue.setActiveTab(file.fileId, tab);
-  };
+  const rowCount = file.rawData?.length ?? 0;
+  const colCount = file.rawData?.[0] ? Object.keys(file.rawData[0]).length : 0;
 
   const handleVizChosen = async (viz: VizProposal) => {
     setIsDashboardLoading(true);
@@ -50,50 +48,47 @@ export default function TabbedFileView({ file, queue }: TabbedFileViewProps) {
     }
   };
 
-  const rowCount = file.rawData?.length ?? 0;
-  const colCount = file.rawData?.[0] ? Object.keys(file.rawData[0]).length : 0;
-
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* File metadata header */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border-dark shrink-0 bg-surface-dark/50">
-        <div>
-          <h2 className="text-sm font-bold text-slate-100">{file.fileName}</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {rowCount.toLocaleString()} filas · {colCount} columnas
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-900/30 text-green-400 border border-green-500/30">
-            <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4ade80', display: 'inline-block' }} />
-            Listo
-          </span>
-          <button
-            onClick={() => queue.removeFile(file.fileId)}
-            className="text-slate-600 hover:text-red-400 transition-colors"
-            title="Eliminar archivo"
-          >
-            <span className="material-symbols-outlined text-sm">close</span>
-          </button>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-border-dark bg-surface-dark/50 px-6 py-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-slate-100">{file.fileName}</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {rowCount.toLocaleString()} filas · {colCount} columnas
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-900/30 px-2.5 py-1 text-xs font-semibold text-green-400">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" />
+              {file.status === 'VALIDATION_FAILED' ? 'Validación fallida' : 'Listo'}
+            </span>
+            <button
+              onClick={() => queue.removeFile(file.fileId)}
+              className="text-slate-600 transition-colors hover:text-red-400"
+              title="Eliminar archivo"
+            >
+              <span className="material-symbols-outlined text-sm">close</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 px-4 pt-3 border-b border-border-dark overflow-x-auto shrink-0">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-border-dark px-4 pt-3 shrink-0">
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => handleTabChange(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors whitespace-nowrap ${
+            onClick={() => queue.setActiveTab(file.fileId, tab.id)}
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-t-lg border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
               activeTab === tab.id
-                ? 'border-primary text-primary bg-primary/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                ? 'border-primary bg-primary/5 text-primary'
+                : 'border-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
             }`}
           >
             <span className="material-symbols-outlined text-sm">{tab.icon}</span>
             {tab.label}
             {tab.hasData && (
-              <span className="inline-flex items-center justify-center rounded-full bg-green-500/10 text-green-400" style={{ width: 16, height: 16 }}>
+              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-green-500/10 text-green-400">
                 <span className="material-symbols-outlined text-[10px]">check</span>
               </span>
             )}
@@ -101,98 +96,88 @@ export default function TabbedFileView({ file, queue }: TabbedFileViewProps) {
         ))}
       </div>
 
-      {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
-
-        {/* Archivo original — always shows raw data with issue highlights */}
         {activeTab === 'original' && file.rawData && (
           <div className="animate-fade-in">
             <div className="mb-4">
-              <h3 className="font-bold text-slate-100">Archivo Original</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <h3 className="font-bold text-slate-100">Archivo original</h3>
+              <p className="mt-0.5 text-xs text-slate-500">
                 Vista sin modificar de los primeros {Math.min(50, file.rawData.length)} registros
               </p>
             </div>
-            <InteractiveSheet
-              data={file.rawData.slice(0, 50)}
-              schema={file.schema ?? undefined}
-              anomalies={file.dataAnomalies}
-              issueReport={file.issueReport}
-            />
+            <InteractiveSheet data={file.rawData.slice(0, 50)} schema={file.schema ?? undefined} />
           </div>
         )}
 
-        {/* Esquema */}
         {activeTab === 'schema' && (
-          <SchemaTab schemaBlueprint={file.schemaBlueprint} />
+          <SchemaTab blueprint={file.approvedBlueprint ?? file.draftBlueprint} />
         )}
 
-        {/* Normalización */}
         {activeTab === 'normalization' && (
-          <NormalizationTab rawData={file.rawData} cleanedData={file.cleanedData} reconciliationReport={file.reconciliationReport} />
+          <NormalizationTab
+            rawData={file.rawData}
+            cleanedData={file.normalizedData ?? file.cleanedData}
+            reconciliationReport={file.reconciliationReport}
+          />
         )}
 
-        {/* Validación */}
-        {activeTab === 'validation' && (
-          <ValidationTab dataAnomalies={file.dataAnomalies} />
-        )}
+        {activeTab === 'validation' && <ValidationTab validationReport={file.validationReport} />}
 
-        {/* Dashboard: progressive disclosure */}
         {activeTab === 'dashboard' && file.sessionId && (
           <div className="animate-fade-in space-y-6">
-            {/* Analysis gate */}
             {!file.analysisApproved ? (
               <AnalysisPanel
                 sessionId={file.sessionId}
                 analysis={file.analysis}
-                onAnalysisGenerated={(a) => queue.reviseAnalysis(file.fileId, a).catch(() => {})}
+                onAnalysisGenerated={(analysis) => queue.reviseAnalysis(file.fileId, analysis).catch(() => {})}
                 onApproved={() => queue.approveAnalysis(file.fileId)}
               />
             ) : !file.reportConfig ? (
-              /* Viz proposals gate */
               <div>
                 <VizProposalPanel
                   sessionId={file.sessionId}
                   proposals={file.vizProposals}
                   schema={file.schema}
-                  onProposalsLoaded={(_p) => {
-                    // Proposals are already pre-loaded in file.vizProposals by the pipeline.
-                    // VizProposalPanel uses its own internal state, so this is a no-op.
-                  }}
+                  onProposalsLoaded={() => {}}
                   onVizChosen={handleVizChosen}
                 />
                 {isDashboardLoading && (
                   <div className="mt-6 text-center">
-                    <div className="inline-flex items-center gap-3 bg-surface-dark/50 border border-border-dark rounded-xl px-6 py-3">
-                      <div className="size-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    <div className="inline-flex items-center gap-3 rounded-xl border border-border-dark bg-surface-dark/50 px-6 py-3">
+                      <div className="size-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
                       <span className="text-sm text-slate-400">Generando dashboard con auditoría final...</span>
                     </div>
                   </div>
                 )}
               </div>
             ) : (
-              /* Final dashboard */
               <div>
-                <div className="mb-6 flex justify-between items-end">
+                <div className="mb-6 flex items-end justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold text-slate-100">Dashboard de Negocio</h2>
-                    <p className="text-sm text-slate-400">Insights generados por Inteligencia Artificial</p>
+                    <h2 className="text-2xl font-bold text-slate-100">Dashboard de negocio</h2>
+                    <p className="text-sm text-slate-400">Generado sobre el dataset normalizado.</p>
                   </div>
                   <div className="flex items-center gap-3">
                     {file.auditPassed !== null && (
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${file.auditPassed ? 'bg-green-900/30 text-green-400 border border-green-500/30' : 'bg-yellow-900/30 text-yellow-400 border border-yellow-500/30'}`}>
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
+                          file.auditPassed
+                            ? 'border border-green-500/30 bg-green-900/30 text-green-400'
+                            : 'border border-yellow-500/30 bg-yellow-900/30 text-yellow-400'
+                        }`}
+                      >
                         <span className="material-symbols-outlined text-sm">
                           {file.auditPassed ? 'verified' : 'warning'}
                         </span>
-                        {file.auditPassed ? 'Auditoría Pasada' : 'Discrepancias'}
+                        {file.auditPassed ? 'Auditoría pasada' : 'Discrepancias'}
                       </span>
                     )}
                     <button
                       onClick={() => queue.resetDashboard(file.fileId)}
-                      className="text-primary text-sm font-semibold hover:underline flex items-center gap-1"
+                      className="flex items-center gap-1 text-sm font-semibold text-primary hover:underline"
                     >
                       <span className="material-symbols-outlined text-sm">edit</span>
-                      Cambiar Visualización
+                      Cambiar visualización
                     </button>
                   </div>
                 </div>
@@ -207,3 +192,4 @@ export default function TabbedFileView({ file, queue }: TabbedFileViewProps) {
     </div>
   );
 }
+

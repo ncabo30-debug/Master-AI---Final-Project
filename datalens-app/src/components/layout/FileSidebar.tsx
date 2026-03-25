@@ -49,7 +49,7 @@ export default function FileSidebar({
       <div className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5">
         {fileList.length === 0 && (
           <p className="text-xs text-slate-600 text-center px-2 py-4">
-            Sube archivos CSV para comenzar
+            Sube archivos CSV o Excel para comenzar
           </p>
         )}
         {fileList.map((file) => (

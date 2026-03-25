@@ -1,5 +1,67 @@
 # Task Log
 
+## 2026-03-25 — Implementación del pipeline de 9 fases con blueprint, AG Grid y persistencia híbrida preparada para Supabase
+
+### Lo que se hizo
+- Se implementó una nueva capa `src/lib/pipeline/` con ingesta, profiling, blueprint, ejecución, export, validación SQL y adapters de persistencia.
+- Se implementó una nueva capa `src/lib/transformations/` con catálogo determinista, executor estructural, router y executor de columnas.
+- Se migró el flujo principal del backend a:
+  - `generate_blueprint`
+  - `save_blueprint_override`
+  - `execute_blueprint_and_save`
+  - `get_dataset_status`
+  - `export_normalized_file`
+- Se extendieron `SchemaAgent.ts` y `ManagerAgent.ts` para soportar:
+  - diagnóstico estructural
+  - blueprint de normalización
+  - ejecución final del blueprint
+- Se reescribió `DataStore.ts` para guardar manifest, workbook, original file, draft blueprint, approved blueprint, normalized preview, normalized data y validation report.
+- Se migró `useFileQueue.ts` y `fileQueue.ts` al flujo nuevo con estados:
+  - `PROFILING`
+  - `BLUEPRINT_READY`
+  - `AWAITING_APPROVAL`
+  - `EXECUTING_BLUEPRINT`
+  - `PERSISTING`
+  - `SQL_VALIDATING`
+  - `READY`
+  - `VALIDATION_FAILED`
+- Se reemplazó la review intermedia por una pantalla nueva con AG Grid:
+  - `BlueprintReviewFlow.tsx`
+  - doble preview original / normalizado
+  - edición por columna del blueprint
+  - toggles para acciones estructurales
+- Se adaptaron tabs finales para mostrar:
+  - blueprint
+  - dataset normalizado
+  - validación SQL
+  - dashboard sobre normalizado
+
+### Dependencias agregadas
+- `ag-grid-community`
+- `ag-grid-react`
+- `@supabase/supabase-js`
+- `xlsx`
+- `zod`
+
+### Verificación
+- `npm run build` OK
+
+### Estado de Supabase al finalizar esta sesión
+- El contrato de Supabase está preparado, pero la integración real todavía no está hecha.
+- `SupabaseDatasetRepository` existe, pero sigue como stub.
+- La persistencia real actual sigue siendo local/in-memory + archivo temporal.
+- La validación SQL corre hoy sobre SQLite local.
+- Falta todavía:
+  - definir `CREATE TABLE` reales de metadata
+  - definir tablas dinámicas por dataset
+  - definir buckets/path de Storage
+  - implementar inserts batch
+  - implementar RPC y SQL reales
+  - conectar todo con env vars y proyecto Supabase
+
+### Siguiente paso natural
+Si querés, el siguiente paso natural es que te deje armada también la capa SQL/RPC de Supabase con los CREATE TABLE, metadata tables y funciones rpc listas para enchufar.
+
 ## 2026-03-23 — Fase H completa: validación pre-normalización + scan comprensivo de datos
 
 ### Lo que se hizo esta sesión

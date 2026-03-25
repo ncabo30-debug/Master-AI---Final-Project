@@ -1,98 +1,84 @@
-import type { DataAnomaly, DataAnomalyKind } from '@/lib/agents/types';
+import type { ValidationReport } from '@/lib/pipeline/types';
 
 interface ValidationTabProps {
-  dataAnomalies: DataAnomaly[];
+  validationReport: ValidationReport | null;
 }
 
-const KIND_LABELS: Record<DataAnomalyKind, string> = {
-  outlier:    'Valores atípicos',
-  duplicate:  'Duplicados',
-  validation: 'Validación',
-  integrity:  'Integridad',
-};
+export default function ValidationTab({ validationReport }: ValidationTabProps) {
+  if (!validationReport) {
+    return (
+      <div className="flex items-center justify-center h-40 text-slate-500 text-sm">
+        No hay resultados de validación disponibles.
+      </div>
+    );
+  }
 
-const KIND_ICONS: Record<DataAnomalyKind, string> = {
-  outlier:    'troubleshoot',
-  duplicate:  'content_copy',
-  validation: 'rule',
-  integrity:  'verified_user',
-};
-
-export default function ValidationTab({ dataAnomalies }: ValidationTabProps) {
-  const grouped = dataAnomalies.reduce<Record<DataAnomalyKind, DataAnomaly[]>>(
-    (acc, a) => {
-      if (!acc[a.kind]) acc[a.kind] = [];
-      acc[a.kind].push(a);
-      return acc;
-    },
-    {} as Record<DataAnomalyKind, DataAnomaly[]>
-  );
-
-  const passed = dataAnomalies.length === 0;
-  const warningCount = dataAnomalies.filter((a) => a.severity === 'warning').length;
-  const errorCount = dataAnomalies.filter((a) => a.severity === 'error').length;
+  const blockingIssues = validationReport.issues.filter((issue) => issue.severity === 'error').length;
 
   return (
     <div className="animate-fade-in space-y-4">
-      {/* Scorecard */}
-      <div className={`flex items-center gap-4 p-4 rounded-xl border ${passed ? 'bg-green-500/5 border-green-500/20' : 'bg-amber-500/5 border-amber-500/20'}`}>
-        <div className={`size-10 rounded-full flex items-center justify-center ${passed ? 'bg-green-500/10 text-green-400' : 'bg-amber-500/10 text-amber-400'}`}>
-          <span className="material-symbols-outlined">{passed ? 'verified' : 'warning'}</span>
+      <div
+        className={`flex items-center gap-4 rounded-xl border p-4 ${
+          validationReport.valid ? 'border-green-500/20 bg-green-500/5' : 'border-red-500/20 bg-red-500/5'
+        }`}
+      >
+        <div
+          className={`flex h-10 w-10 items-center justify-center rounded-full ${
+            validationReport.valid ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+          }`}
+        >
+          <span className="material-symbols-outlined">{validationReport.valid ? 'verified' : 'error'}</span>
         </div>
-        <div className="flex-1">
-          <p className={`font-semibold ${passed ? 'text-green-400' : 'text-amber-400'}`}>
-            {passed ? 'Validación completada sin incidencias' : `${dataAnomalies.length} incidencia${dataAnomalies.length > 1 ? 's' : ''} detectada${dataAnomalies.length > 1 ? 's' : ''}`}
+        <div>
+          <p className={`font-semibold ${validationReport.valid ? 'text-green-400' : 'text-red-400'}`}>
+            {validationReport.valid
+              ? 'Validación SQL completada sin bloqueantes'
+              : `${blockingIssues} validación${blockingIssues === 1 ? '' : 'es'} bloqueante${blockingIssues === 1 ? '' : 's'}`}
           </p>
-          {!passed && (
-            <p className="text-xs text-slate-500 mt-0.5">
-              {errorCount > 0 && `${errorCount} error${errorCount > 1 ? 'es' : ''}`}
-              {errorCount > 0 && warningCount > 0 && ' · '}
-              {warningCount > 0 && `${warningCount} advertencia${warningCount > 1 ? 's' : ''}`}
-            </p>
-          )}
+          <p className="text-xs text-slate-500 mt-0.5">
+            Ejecutada el {new Date(validationReport.executedAt).toLocaleString()}
+          </p>
         </div>
       </div>
 
-      {/* Anomaly groups */}
-      {(Object.keys(grouped) as DataAnomalyKind[]).map((kind) => (
-        <div key={kind} className="rounded-xl border border-border-dark overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-slate-800/50 border-b border-border-dark">
-            <span className="material-symbols-outlined text-sm text-slate-400">{KIND_ICONS[kind]}</span>
-            <h4 className="text-sm font-semibold text-slate-300">{KIND_LABELS[kind]}</h4>
-            <span className="ml-auto text-xs font-medium bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">
-              {grouped[kind].length}
-            </span>
-          </div>
-          <div className="divide-y divide-border-dark">
-            {grouped[kind].map((anomaly) => (
-              <div key={anomaly.id} className="flex items-start gap-3 px-4 py-3">
-                <span
-                  className={`shrink-0 mt-0.5 size-1.5 rounded-full ${anomaly.severity === 'error' ? 'bg-red-400' : 'bg-amber-400'}`}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-300">{anomaly.message}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Columna: <span className="font-mono text-slate-400">{anomaly.column}</span>
-                    {anomaly.rowIndex != null && ` · Fila ${anomaly.rowIndex + 1}`}
-                    {anomaly.value != null && ` · Valor: ${anomaly.value}`}
-                  </p>
-                </div>
-                <span
-                  className={`shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${anomaly.severity === 'error' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}
-                >
-                  {anomaly.severity === 'error' ? 'Error' : 'Advertencia'}
-                </span>
-              </div>
+      <div className="overflow-x-auto rounded-xl border border-border-dark">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border-dark bg-slate-800/50">
+              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Regla</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Severidad</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Detalle</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-dark">
+            {validationReport.issues.length === 0 && (
+              <tr>
+                <td className="px-4 py-4 text-sm text-slate-500" colSpan={3}>
+                  No se detectaron observaciones.
+                </td>
+              </tr>
+            )}
+            {validationReport.issues.map((issue) => (
+              <tr key={issue.ruleId} className="hover:bg-slate-800/30 transition-colors">
+                <td className="px-4 py-3 font-medium text-slate-200">{issue.ruleName}</td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      issue.severity === 'error'
+                        ? 'bg-red-500/10 text-red-400'
+                        : 'bg-amber-500/10 text-amber-400'
+                    }`}
+                  >
+                    {issue.severity}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-400">{issue.message}</td>
+              </tr>
             ))}
-          </div>
-        </div>
-      ))}
-
-      {passed && (
-        <div className="text-center text-slate-500 text-sm py-4">
-          No se detectaron anomalías en los datos.
-        </div>
-      )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
+

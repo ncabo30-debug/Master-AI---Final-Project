@@ -2,16 +2,28 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type { ProfileResult, VizProposal, FileInspectionResult, DuplicateReport, OutlierReport, SchemaMap, QuestionOption, SchemaBlueprint, IssueReport } from './agents/types';
+import type {
+    DatasetManifest,
+    NormalizationBlueprint,
+    RawWorkbook,
+    StatisticalProfile,
+    ValidationReport,
+} from './pipeline/types';
 
 interface StoredSession {
     /** Original data — written once on first upload, NEVER overwritten. */
     originalData: Record<string, unknown>[];
     /** Cleaned/normalized data — initially equal to originalData, updated by storeCleaningResult(). */
     cleanedData: Record<string, unknown>[];
+    normalizedData?: Record<string, unknown>[];
     excelBufferBase64?: string;
+    normalizedExportBase64?: string;
     profile?: ProfileResult;
+    statisticalProfile?: StatisticalProfile;
     schema?: SchemaMap;
     schemaBlueprint?: SchemaBlueprint;
+    draftBlueprint?: NormalizationBlueprint;
+    approvedBlueprint?: NormalizationBlueprint;
     questions?: QuestionOption[];
     analysis?: string;
     vizProposals?: VizProposal[];
@@ -21,11 +33,48 @@ interface StoredSession {
     duplicateReport?: DuplicateReport;
     outlierReport?: OutlierReport;
     issueReport?: IssueReport;
+    workbook?: RawWorkbook;
+    manifest?: DatasetManifest;
+    originalFileBase64?: string;
+    normalizedPreview?: Record<string, unknown>[];
+    validationReport?: ValidationReport;
+    persistenceStatus?: string;
     ts: number;
 }
 
 const SESSION_DIR = path.join(os.tmpdir(), 'datalens_sessions');
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL for disk
+
+function toLegacyProfile(profile: StatisticalProfile): ProfileResult {
+    return {
+        columns: profile.columns.map((column) => ({
+            name: column.name,
+            inferredType: column.inferredType,
+            detectedIssues: [],
+            cleaningRules: [],
+        })),
+        quantitative: {
+            rowCount: profile.rowCount,
+            colCount: profile.columnCount,
+            columns: profile.columns.map((column) => ({
+                name: column.name,
+                type: column.inferredType,
+                nullCount: Math.round(column.nullRatio * profile.rowCount),
+                uniqueCount: column.uniqueCount,
+                ...(column.numericSummary && {
+                    sum: column.numericSummary.sum,
+                    avg: column.numericSummary.avg,
+                    min: column.numericSummary.min,
+                    max: column.numericSummary.max,
+                }),
+                ...(column.dateSummary && {
+                    dateMin: column.dateSummary.min,
+                    dateMax: column.dateSummary.max,
+                }),
+            })),
+        },
+    };
+}
 
 function ensureDir() {
     if (!fs.existsSync(SESSION_DIR)) {
@@ -68,12 +117,23 @@ export function storeData(sessionId: string, data: Record<string, unknown>[]): s
     writeSession(sessionId, {
         originalData: existing?.originalData || data, // never overwrite original
         cleanedData: data,
+        normalizedData: existing?.normalizedData || data,
         excelBufferBase64: existing?.excelBufferBase64,
+        normalizedExportBase64: existing?.normalizedExportBase64,
         profile: existing?.profile,
+        statisticalProfile: existing?.statisticalProfile,
         schema: existing?.schema,
         schemaBlueprint: existing?.schemaBlueprint,
+        draftBlueprint: existing?.draftBlueprint,
+        approvedBlueprint: existing?.approvedBlueprint,
         questions: existing?.questions,
         issueReport: existing?.issueReport,
+        workbook: existing?.workbook,
+        manifest: existing?.manifest,
+        originalFileBase64: existing?.originalFileBase64,
+        normalizedPreview: existing?.normalizedPreview,
+        validationReport: existing?.validationReport,
+        persistenceStatus: existing?.persistenceStatus,
         ts: Date.now()
     });
     return sessionId;
@@ -94,6 +154,7 @@ export function storeCleaningResult(
     writeSession(sessionId, {
         ...(existing || { originalData: cleanedData, cleanedData }),
         cleanedData,
+        normalizedData: cleanedData,
         excelBufferBase64: base64Buffer,
         profile,
         ts: Date.now()
@@ -106,7 +167,7 @@ export function getData(sessionId: string): Record<string, unknown>[] | null {
     if (!session) return null;
     session.ts = Date.now();
     writeSession(sessionId, session);
-    return session.cleanedData;
+    return session.normalizedData || session.cleanedData;
 }
 
 /** H-1: Returns the original, immutable data as uploaded by the user. */
@@ -173,4 +234,96 @@ export function getVizProposals(sessionId: string): VizProposal[] | null {
 
 export function getSummaries(sessionId: string): Record<string, string> | null {
     return readSession(sessionId)?.summaries || null;
+}
+
+export function storeBlueprintSession(args: {
+    sessionId: string;
+    workbook: RawWorkbook;
+    manifest: DatasetManifest;
+    originalData: Record<string, unknown>[];
+    statisticalProfile: StatisticalProfile;
+    draftBlueprint: NormalizationBlueprint;
+    schema: SchemaMap;
+    normalizedPreview: Record<string, unknown>[];
+    originalFileBase64: string;
+}): void {
+    const existing = readSession(args.sessionId);
+    writeSession(args.sessionId, {
+        ...(existing || { originalData: args.originalData, cleanedData: args.originalData }),
+        originalData: existing?.originalData || args.originalData,
+        cleanedData: args.originalData,
+        normalizedData: existing?.normalizedData || args.originalData,
+        workbook: args.workbook,
+        manifest: args.manifest,
+        originalFileBase64: args.originalFileBase64,
+        statisticalProfile: args.statisticalProfile,
+        profile: toLegacyProfile(args.statisticalProfile),
+        draftBlueprint: args.draftBlueprint,
+        schema: args.schema,
+        normalizedPreview: args.normalizedPreview,
+        ts: Date.now(),
+    });
+}
+
+export function storeNormalizedExecution(args: {
+    sessionId: string;
+    approvedBlueprint: NormalizationBlueprint;
+    normalizedData: Record<string, unknown>[];
+    normalizedPreview: Record<string, unknown>[];
+    normalizedExportBase64: string;
+    validationReport: ValidationReport;
+    manifest: DatasetManifest;
+}): void {
+    const existing = readSession(args.sessionId);
+    if (!existing) return;
+
+    writeSession(args.sessionId, {
+        ...existing,
+        approvedBlueprint: args.approvedBlueprint,
+        normalizedData: args.normalizedData,
+        cleanedData: args.normalizedData,
+        normalizedPreview: args.normalizedPreview,
+        normalizedExportBase64: args.normalizedExportBase64,
+        validationReport: args.validationReport,
+        manifest: args.manifest,
+        profile: existing.profile || (existing.statisticalProfile ? toLegacyProfile(existing.statisticalProfile) : existing.profile),
+        persistenceStatus: args.validationReport.valid ? 'ready' : 'validation_failed',
+        ts: Date.now(),
+    });
+}
+
+export function getWorkbook(sessionId: string): RawWorkbook | null {
+    return readSession(sessionId)?.workbook || null;
+}
+
+export function getManifest(sessionId: string): DatasetManifest | null {
+    return readSession(sessionId)?.manifest || null;
+}
+
+export function getStatisticalProfile(sessionId: string): StatisticalProfile | null {
+    return readSession(sessionId)?.statisticalProfile || null;
+}
+
+export function getDraftBlueprint(sessionId: string): NormalizationBlueprint | null {
+    return readSession(sessionId)?.draftBlueprint || null;
+}
+
+export function getApprovedBlueprint(sessionId: string): NormalizationBlueprint | null {
+    return readSession(sessionId)?.approvedBlueprint || null;
+}
+
+export function getOriginalFileBase64(sessionId: string): string | null {
+    return readSession(sessionId)?.originalFileBase64 || null;
+}
+
+export function getNormalizedPreview(sessionId: string): Record<string, unknown>[] | null {
+    return readSession(sessionId)?.normalizedPreview || null;
+}
+
+export function getValidationReport(sessionId: string): ValidationReport | null {
+    return readSession(sessionId)?.validationReport || null;
+}
+
+export function getNormalizedExportBase64(sessionId: string): string | null {
+    return readSession(sessionId)?.normalizedExportBase64 || null;
 }

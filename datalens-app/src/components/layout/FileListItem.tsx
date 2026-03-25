@@ -42,10 +42,12 @@ export default function FileListItem({ file, isSelected, onClick }: FileListItem
         </p>
         <p
           className={`text-xs truncate ${
-            file.status === 'AWAITING_VALIDATION'
+            file.status === 'AWAITING_APPROVAL' || file.status === 'BLUEPRINT_READY'
               ? 'text-red-400'
               : file.status === 'READY'
               ? 'text-green-400'
+              : file.status === 'VALIDATION_FAILED'
+              ? 'text-amber-400'
               : file.status === 'ERROR'
               ? 'text-red-400'
               : 'text-slate-500'

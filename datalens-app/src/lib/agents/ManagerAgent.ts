@@ -19,12 +19,22 @@ import { DuplicateDetectorAgent } from './DuplicateDetectorAgent';
 import { OutlierDetectorAgent } from './OutlierDetectorAgent';
 import { LLM_TIMEOUT_MS } from './core/LLMService';
 import { detectDominantDateFormat, detectMostCommonYear, parseDate, formatDateToString } from './dateUtils';
+import { executeStructuralPlan } from '@/lib/transformations/structuralExecutor';
+import { executeBlueprintPipeline, generateBlueprintPipeline } from '@/lib/pipeline/service';
 import type {
     ProfileResult, CleanResult, VizProposalsResult, ReportConfig,
     FileInspectionResult, DuplicateReport, OutlierReport, ChatResult,
     SchemaMap, QuestionOption, VizProposal, SpecialistCodeResult, ValidatorResult,
     IssueReport, DetectedIssue, ReconciliationReport
 } from './types';
+import type {
+    BlueprintGenerationResult,
+    DatasetManifest,
+    NormalizationBlueprint,
+    RawWorkbook,
+    StatisticalProfile,
+    ValidationReport,
+} from '@/lib/pipeline/types';
 
 /**
  * Orchestrator agent. Spins up child agents in isolated session buses,
@@ -50,6 +60,69 @@ export class ManagerAgent extends AgentBase {
 
     public async execute(): Promise<never> {
         throw new Error('ManagerAgent uses targeted methods.');
+    }
+
+    public async generateBlueprint(args: {
+        sessionId: string;
+        workbook: RawWorkbook;
+        originalFileBase64: string;
+    }): Promise<BlueprintGenerationResult> {
+        const sessionBus = new AgentBus(this.sessionId);
+        const schemaA = new SchemaAgent(`schema-blueprint-${Date.now()}`, this.tenantId, sessionBus);
+
+        try {
+            const heuristicResult = await generateBlueprintPipeline({
+                sessionId: args.sessionId,
+                workbook: args.workbook,
+                originalFileBase64: args.originalFileBase64,
+            });
+
+            const diagnosis = await schemaA.analyzeStructure(
+                heuristicResult.profile,
+                heuristicResult.preview.originalPreview
+            );
+
+            const structuralResult = executeStructuralPlan(args.workbook, diagnosis.plan_limpieza);
+            const refinedBlueprint = await schemaA.analyzeNormalization({
+                sessionId: args.sessionId,
+                datasetId: heuristicResult.manifest.datasetId,
+                profile: heuristicResult.profile,
+                cleanedRows: structuralResult.cleanedRows,
+                diagnosis,
+            });
+
+            return generateBlueprintPipeline({
+                sessionId: args.sessionId,
+                workbook: args.workbook,
+                originalFileBase64: args.originalFileBase64,
+                diagnosisOverride: diagnosis,
+                blueprintOverride: refinedBlueprint,
+            });
+        } finally {
+            schemaA.dispose();
+            AgentRegistry.unregister(schemaA.id);
+        }
+    }
+
+    public async executeBlueprintAndSave(args: {
+        manifest: DatasetManifest;
+        workbook: RawWorkbook;
+        approvedBlueprint: NormalizationBlueprint;
+        profile: StatisticalProfile;
+        originalFileBase64: string;
+    }): Promise<{
+        normalizedData: Record<string, unknown>[];
+        normalizedExportBase64: string;
+        validationReport: ValidationReport;
+        manifest: DatasetManifest;
+    }> {
+        const result = await executeBlueprintPipeline(args);
+        return {
+            normalizedData: result.normalizedData,
+            normalizedExportBase64: result.normalizedExportBase64,
+            validationReport: result.validationReport,
+            manifest: result.persistenceResult.manifest,
+        };
     }
 
     // ══════════════════════════════════════════════════════════

@@ -1,72 +1,16 @@
 'use client';
 
-/**
- * useFileQueue.ts
- * Central React hook that owns the multi-file state machine.
- * H-6: Split pipeline into runDetection → user reviews → confirmAndClean → runPipelinePhase2
- */
-
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FileRecord,
-  FileStatus,
   createFileRecord,
   canStartProcessing,
-  getReadyFiles,
   getNextQueued,
+  getReadyFiles,
 } from './fileQueue';
-import { parseCSVFile } from './csvParser';
-import type { EnrichedSchemaField, OutlierReport, DataAnomaly, VizProposal, IssueReport } from './agents/types';
-
-// ── Anomaly helper (migrated from page.tsx) ────────────────
-
-function deriveLocalAnomaliesFromOutliers(
-  rows: Record<string, unknown>[],
-  outlierReport: OutlierReport | null | undefined
-): DataAnomaly[] {
-  if (!outlierReport || outlierReport.outliers.length === 0) return [];
-
-  const normalizeValue = (value: unknown) => {
-    if (value == null) return '';
-    if (value instanceof Date) return value.toISOString();
-    return String(value).trim();
-  };
-
-  const anomalies: DataAnomaly[] = [];
-
-  outlierReport.outliers.forEach((outlier) => {
-    const extremeValueSet = new Set(outlier.extremeValues.map(normalizeValue));
-
-    rows.forEach((row, rowIndex) => {
-      const cellValue = row[outlier.column];
-      const normalizedCellValue = normalizeValue(cellValue);
-
-      if (!normalizedCellValue || !extremeValueSet.has(normalizedCellValue)) return;
-
-      anomalies.push({
-        id: `outlier-${outlier.column}-${rowIndex}-${normalizedCellValue}`,
-        kind: 'outlier',
-        source: 'local_outlier_detector',
-        severity: 'warning',
-        column: outlier.column,
-        rowIndex,
-        value:
-          typeof cellValue === 'number' || typeof cellValue === 'string'
-            ? cellValue
-            : normalizedCellValue,
-        message: `Valor inusual detectado en ${outlier.column}`,
-        metadata: {
-          lowerBound: outlier.lowerBound,
-          upperBound: outlier.upperBound,
-        },
-      });
-    });
-  });
-
-  return anomalies;
-}
-
-// ── API helpers ─────────────────────────────────────────────
+import { parseSpreadsheetFile } from './pipeline/ingestion';
+import type { ColumnNormalizationPlan, NormalizationBlueprint } from './pipeline/types';
+import type { EnrichedSchemaField, VizProposal } from './agents/types';
 
 async function apiPost(body: Record<string, unknown>) {
   const res = await fetch('/api/analyze', {
@@ -83,277 +27,219 @@ async function clearSessionLogs(sessionId: string) {
   try {
     await fetch(`/api/admin/logs?sessionId=${sessionId}`, { method: 'DELETE' });
   } catch {
-    // non-critical
+    // best effort
   }
 }
-
-// ── Hook ───────────────────────────────────────────────────
 
 export type UseFileQueueReturn = ReturnType<typeof useFileQueue>;
 
 export function useFileQueue() {
   const [files, setFiles] = useState<Map<string, FileRecord>>(new Map());
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-
-  // Keep a ref to always access the latest files map in async pipeline callbacks
   const filesRef = useRef<Map<string, FileRecord>>(new Map());
 
-  // Derived
   const selectedFile = selectedFileId ? (files.get(selectedFileId) ?? null) : null;
   const readyFiles = getReadyFiles(files);
-
-  // ── Internal state updater ─────────────────────────────
 
   const patchFile = useCallback((fileId: string, patch: Partial<FileRecord>) => {
     setFiles((prev) => {
       const existing = prev.get(fileId);
       if (!existing) return prev;
       const next = new Map(prev);
-      const updated = { ...existing, ...patch };
-      next.set(fileId, updated);
+      next.set(fileId, { ...existing, ...patch });
       filesRef.current = next;
       return next;
     });
   }, []);
 
-  // ══════════════════════════════════════════════════════════
-  //  H-6: Phase 0 — Detection (replaces old runPipelinePhase1)
-  // ══════════════════════════════════════════════════════════
-
-  const runDetection = useCallback(
+  const runBlueprintGeneration = useCallback(
     async (fileId: string) => {
       const file = filesRef.current.get(fileId);
-      if (!file || !file.rawData) return;
-      // Guard: only start if QUEUED (prevents React StrictMode double-fire)
-      if (file.status !== 'QUEUED') return;
+      if (!file?.workbook || !file.originalFileBase64 || file.status !== 'QUEUED') return;
 
       try {
-        // DETECTING: detect_issues
-        patchFile(fileId, { status: 'DETECTING' });
-
-        const detectResult = await apiPost({
-          action: 'detect_issues',
-          data: file.rawData,
+        patchFile(fileId, { status: 'PROFILING' });
+        const result = await apiPost({
+          action: 'generate_blueprint',
+          workbook: file.workbook,
+          originalFileBase64: file.originalFileBase64,
         });
-
-        const sessionId: string = detectResult.sessionId;
-        const issueReport: IssueReport = detectResult.issueReport;
-
-        // Derive local anomalies for backward compat
-        const dataAnomalies = deriveLocalAnomaliesFromOutliers(
-          file.rawData,
-          detectResult.outlierReport ?? null
-        );
 
         patchFile(fileId, {
-          sessionId,
-          issueReport,
-          dataAnomalies,
-          status: 'AWAITING_VALIDATION',
+          sessionId: result.sessionId,
+          manifest: result.manifest,
+          rawData: result.preview?.originalPreview ?? file.rawData,
+          normalizedPreview: result.preview?.normalizedPreview ?? null,
+          draftBlueprint: result.draftBlueprint,
+          approvedBlueprint: result.draftBlueprint,
+          schema: result.schema,
+          statisticalProfile: result.profile,
+          status: 'AWAITING_APPROVAL',
+          issueReport: result.issueReport ?? null,
         });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Error desconocido';
-        patchFile(fileId, { status: 'ERROR', error: msg });
+      } catch (error) {
+        patchFile(fileId, {
+          status: 'ERROR',
+          error: error instanceof Error ? error.message : 'Error desconocido',
+        });
       }
     },
     [patchFile]
   );
 
-  // ══════════════════════════════════════════════════════════
-  //  H-6: Phase 2 — Cleaning + Schema + Analysis
-  // ══════════════════════════════════════════════════════════
-
-  const runCleaning = useCallback(
-    async (fileId: string, approvedIssueIds?: string[]) => {
+  const runExecution = useCallback(
+    async (fileId: string, blueprint: NormalizationBlueprint) => {
       const file = filesRef.current.get(fileId);
-      if (!file || !file.sessionId) return;
-
-      const { sessionId } = file;
+      if (!file?.sessionId) return;
 
       try {
-        // CLEANING: apply_cleaning
-        patchFile(fileId, { status: 'CLEANING' });
-
-        const cleanResult = await apiPost({
-          action: 'apply_cleaning',
-          sessionId,
-          approvedIssueIds,
+        patchFile(fileId, { status: 'EXECUTING_BLUEPRINT' });
+        const result = await apiPost({
+          action: 'execute_blueprint_and_save',
+          sessionId: file.sessionId,
+          approvedBlueprint: blueprint,
         });
 
         patchFile(fileId, {
-          cleanedData: cleanResult.cleanedData ?? null,
-          reconciliationReport: cleanResult.reconciliationReport ?? null,
+          approvedBlueprint: blueprint,
+          normalizedData: result.normalizedData,
+          cleanedData: result.normalizedData,
+          normalizedPreview: result.normalizedPreview ?? result.normalizedData?.slice(0, 50) ?? null,
+          validationReport: result.validationReport,
+          manifest: result.manifest,
+          status: result.validationReport?.valid ? 'READY' : 'VALIDATION_FAILED',
+          activeTab: result.validationReport?.valid ? 'dashboard' : 'validation',
         });
 
-        // SCHEMA_DETECTION: analyze_schema
-        patchFile(fileId, { status: 'SCHEMA_DETECTION' });
+        if (result.validationReport?.valid) {
+          const analysisResult = await apiPost({
+            action: 'generate_analysis',
+            sessionId: file.sessionId,
+          });
 
-        const schemaResult = await apiPost({
-          action: 'analyze_schema',
-          sessionId,
-        });
+          const vizResult = await apiPost({
+            action: 'propose_visualizations',
+            sessionId: file.sessionId,
+          });
 
+          patchFile(fileId, {
+            analysis: analysisResult.analysis,
+            vizProposals: vizResult.proposals,
+            status: 'READY',
+            activeTab: 'dashboard',
+          });
+        }
+      } catch (error) {
         patchFile(fileId, {
-          schema: schemaResult.schema,
-          schemaBlueprint: schemaResult.schemaBlueprint,
-          questions: schemaResult.questions,
+          status: 'ERROR',
+          error: error instanceof Error ? error.message : 'Error desconocido',
         });
-
-        // NORMALIZING: generate_analysis
-        patchFile(fileId, { status: 'NORMALIZING' });
-
-        const analysisResult = await apiPost({
-          action: 'generate_analysis',
-          sessionId,
-        });
-
-        patchFile(fileId, { analysis: analysisResult.analysis });
-
-        // VALIDATING: propose_visualizations
-        patchFile(fileId, { status: 'VALIDATING' });
-
-        const vizResult = await apiPost({
-          action: 'propose_visualizations',
-          sessionId,
-        });
-
-        patchFile(fileId, {
-          vizProposals: vizResult.proposals,
-          status: 'READY',
-          activeTab: 'dashboard',
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Error desconocido';
-        patchFile(fileId, { status: 'ERROR', error: msg });
       }
     },
     [patchFile]
   );
 
-  // ── Legacy Phase 2 (backward compat — used if pipeline is already cleaned) ──
-
-  const runPipelinePhase2 = useCallback(
-    async (fileId: string) => {
-      const file = filesRef.current.get(fileId);
-      if (!file || !file.sessionId) return;
-      if (file.status !== 'AWAITING_VALIDATION') return;
-
-      const { sessionId } = file;
-
-      try {
-        patchFile(fileId, { status: 'NORMALIZING' });
-
-        const analysisResult = await apiPost({
-          action: 'generate_analysis',
-          sessionId,
-        });
-
-        patchFile(fileId, { analysis: analysisResult.analysis });
-
-        patchFile(fileId, { status: 'VALIDATING' });
-
-        const vizResult = await apiPost({
-          action: 'propose_visualizations',
-          sessionId,
-        });
-
-        patchFile(fileId, {
-          vizProposals: vizResult.proposals,
-          status: 'READY',
-          activeTab: 'dashboard',
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Error desconocido';
-        patchFile(fileId, { status: 'ERROR', error: msg });
-      }
-    },
-    [patchFile]
-  );
-
-  // ── Queue manager effect ───────────────────────────────
-
-  // Whenever files map changes, check if any QUEUED file can start
   useEffect(() => {
     const currentFiles = filesRef.current;
     if (!canStartProcessing(currentFiles)) return;
     const next = getNextQueued(currentFiles);
     if (!next) return;
-    runDetection(next.fileId);
-  }, [files, runDetection]);
+    runBlueprintGeneration(next.fileId);
+  }, [files, runBlueprintGeneration]);
 
-  // ── Public API ─────────────────────────────────────────
+  const enqueueFiles = useCallback(async (rawFiles: File[]) => {
+    const supportedFiles = rawFiles.filter((file) => /\.(csv|xlsx|xls)$/i.test(file.name));
+    if (supportedFiles.length === 0) return;
 
-  const enqueueFiles = useCallback(
-    async (rawFiles: File[]) => {
-      const csvFiles = rawFiles.filter((f) => f.name.endsWith('.csv'));
-      if (csvFiles.length === 0) return;
+    const newRecords: FileRecord[] = [];
+    for (const file of supportedFiles) {
+      try {
+        const parsed = await parseSpreadsheetFile(file);
+        const firstSheetRows =
+          parsed.workbook.sheets[0]?.rawRows.slice(1).map((row) =>
+            (parsed.workbook.sheets[0]?.rawRows[0] ?? []).reduce<Record<string, unknown>>((acc, header, index) => {
+              acc[header || `column_${index + 1}`] = row[index] ?? '';
+              return acc;
+            }, {})
+          ) ?? [];
 
-      // Parse all CSVs, create records, add to map
-      const newRecords: FileRecord[] = [];
-      for (const file of csvFiles) {
-        try {
-          const data = await parseCSVFile(file);
-          newRecords.push(createFileRecord(file.name, data));
-        } catch (err) {
-          console.error(`Error parsing ${file.name}:`, err);
-        }
+        newRecords.push(
+          createFileRecord(file.name, firstSheetRows, {
+            workbook: parsed.workbook,
+            originalFileBase64: parsed.originalFileBase64,
+          })
+        );
+      } catch (error) {
+        console.error(`Error parsing ${file.name}:`, error);
       }
+    }
 
-      if (newRecords.length === 0) return;
+    if (newRecords.length === 0) return;
 
-      setFiles((prev) => {
-        const next = new Map(prev);
-        for (const record of newRecords) {
-          next.set(record.fileId, record);
-        }
-        filesRef.current = next;
-        return next;
-      });
+    setFiles((prev) => {
+      const next = new Map(prev);
+      newRecords.forEach((record) => next.set(record.fileId, record));
+      filesRef.current = next;
+      return next;
+    });
 
-      // Select the first new file if none selected
-      setSelectedFileId((prev) => prev ?? newRecords[0].fileId);
-    },
-    []
-  );
+    setSelectedFileId((prev) => prev ?? newRecords[0].fileId);
+  }, []);
 
-  /**
-   * H-6: Called after the user reviews issues and confirms.
-   * Triggers cleaning + schema + analysis + viz in sequence.
-   */
   const confirmAndClean = useCallback(
-    (fileId: string, approvedIssueIds?: string[]) => {
-      runCleaning(fileId, approvedIssueIds);
+    (fileId: string, blueprint?: NormalizationBlueprint) => {
+      const file = filesRef.current.get(fileId);
+      const nextBlueprint = blueprint ?? file?.approvedBlueprint ?? file?.draftBlueprint;
+      if (!nextBlueprint) return;
+      runExecution(fileId, nextBlueprint);
     },
-    [runCleaning]
+    [runExecution]
   );
 
-  /** @deprecated Use confirmAndClean instead. Kept for backward compat. */
-  const confirmSchema = useCallback(
-    (fileId: string) => {
-      runPipelinePhase2(fileId);
-    },
-    [runPipelinePhase2]
-  );
-
-  const handleSchemaOverride = useCallback(
-    async (fileId: string, column: string, semanticRole: EnrichedSchemaField['semantic_role']) => {
+  const handleBlueprintOverride = useCallback(
+    async (
+      fileId: string,
+      columnId: string,
+      patch: Partial<ColumnNormalizationPlan>
+    ) => {
       const file = filesRef.current.get(fileId);
       if (!file?.sessionId) return;
 
-      try {
-        const result = await apiPost({
-          action: 'save_schema_override',
-          sessionId: file.sessionId,
-          column,
-          semanticRole,
-        });
-        patchFile(fileId, {
-          schema: result.schema,
-          schemaBlueprint: result.schemaBlueprint,
-        });
-      } catch (err) {
-        console.error('Schema override failed:', err);
-      }
+      const result = await apiPost({
+        action: 'save_blueprint_override',
+        sessionId: file.sessionId,
+        columnId,
+        patch,
+      });
+
+      patchFile(fileId, {
+        draftBlueprint: result.draftBlueprint,
+        approvedBlueprint: result.draftBlueprint,
+        schema: result.schema,
+        normalizedPreview: result.preview?.normalizedPreview ?? file.normalizedPreview,
+      });
+    },
+    [patchFile]
+  );
+
+  const toggleStructuralAction = useCallback(
+    async (fileId: string, actionId: string, enabled: boolean) => {
+      const file = filesRef.current.get(fileId);
+      if (!file?.sessionId) return;
+
+      const result = await apiPost({
+        action: 'save_blueprint_override',
+        sessionId: file.sessionId,
+        structuralActionId: actionId,
+        enabled,
+      });
+
+      patchFile(fileId, {
+        draftBlueprint: result.draftBlueprint,
+        approvedBlueprint: result.draftBlueprint,
+        schema: result.schema,
+        normalizedPreview: result.preview?.normalizedPreview ?? file.normalizedPreview,
+      });
     },
     [patchFile]
   );
@@ -362,7 +248,6 @@ export function useFileQueue() {
     async (fileId: string, feedback: string) => {
       const file = filesRef.current.get(fileId);
       if (!file?.sessionId) return null;
-
       const result = await apiPost({
         action: 'revise_analysis',
         sessionId: file.sessionId,
@@ -386,22 +271,20 @@ export function useFileQueue() {
       const file = filesRef.current.get(fileId);
       if (!file?.sessionId) return;
 
-      const vizAnswers = {
-        x_axis: viz.xAxis,
-        y_axis: viz.yAxis,
-        chart_type: viz.chartType,
-        ...(viz.groupBy && { group_by: viz.groupBy }),
-      };
-
-      const dashResult = await apiPost({
+      const result = await apiPost({
         action: 'generate_dashboard',
         sessionId: file.sessionId,
-        answers: vizAnswers,
+        answers: {
+          x_axis: viz.xAxis,
+          y_axis: viz.yAxis,
+          chart_type: viz.chartType,
+          ...(viz.groupBy && { group_by: viz.groupBy }),
+        },
       });
 
       patchFile(fileId, {
-        reportConfig: dashResult.report,
-        auditPassed: dashResult.auditPassed,
+        reportConfig: result.report,
+        auditPassed: result.auditPassed,
       });
     },
     [patchFile]
@@ -412,59 +295,53 @@ export function useFileQueue() {
       const file = filesRef.current.get(fileId);
       if (!file?.sessionId) return;
 
-      const { sessionId } = file;
+      const result = await apiPost({
+        action: 'validate_viz',
+        sessionId: file.sessionId,
+        viz,
+      });
 
-      // validate_viz
-      const feasResult = await apiPost({ action: 'validate_viz', sessionId, viz });
-      if (!feasResult.feasible) {
-        throw new Error(feasResult.issues?.join(', ') || 'Visualización no factible');
+      if (!result.feasible) {
+        throw new Error(result.issues?.join(', ') || 'Visualización no factible');
       }
 
       await generateDashboard(fileId, viz);
     },
-    [patchFile, generateDashboard]
+    [generateDashboard]
+  );
+
+  const removeFile = useCallback((fileId: string) => {
+    const file = filesRef.current.get(fileId);
+    if (file?.sessionId) {
+      void clearSessionLogs(file.sessionId);
+    }
+
+    setFiles((prev) => {
+      const next = new Map(prev);
+      next.delete(fileId);
+      filesRef.current = next;
+      return next;
+    });
+
+    setSelectedFileId((prev) => {
+      if (prev !== fileId) return prev;
+      const remaining = Array.from(filesRef.current.keys()).filter((key) => key !== fileId);
+      return remaining[0] ?? null;
+    });
+  }, []);
+
+  const retryFile = useCallback(
+    (fileId: string) => patchFile(fileId, { status: 'QUEUED', error: null }),
+    [patchFile]
+  );
+
+  const resetDashboard = useCallback(
+    (fileId: string) => patchFile(fileId, { reportConfig: null, auditPassed: null }),
+    [patchFile]
   );
 
   const setActiveTab = useCallback(
-    (fileId: string, tab: FileRecord['activeTab']) => {
-      patchFile(fileId, { activeTab: tab });
-    },
-    [patchFile]
-  );
-
-  const removeFile = useCallback(
-    (fileId: string) => {
-      const file = filesRef.current.get(fileId);
-      if (file?.sessionId) clearSessionLogs(file.sessionId);
-
-      setFiles((prev) => {
-        const next = new Map(prev);
-        next.delete(fileId);
-        filesRef.current = next;
-        return next;
-      });
-
-      setSelectedFileId((prev) => {
-        if (prev !== fileId) return prev;
-        const remaining = Array.from(filesRef.current.keys()).filter((k) => k !== fileId);
-        return remaining[0] ?? null;
-      });
-    },
-    []
-  );
-
-  const retryFile = useCallback(
-    (fileId: string) => {
-      patchFile(fileId, { status: 'QUEUED', error: null });
-    },
-    [patchFile]
-  );
-
-  /** Clears reportConfig so the user can re-select a visualization. */
-  const resetDashboard = useCallback(
-    (fileId: string) => {
-      patchFile(fileId, { reportConfig: null, auditPassed: null });
-    },
+    (fileId: string, tab: FileRecord['activeTab']) => patchFile(fileId, { activeTab: tab }),
     [patchFile]
   );
 
@@ -476,8 +353,17 @@ export function useFileQueue() {
     readyFiles,
     enqueueFiles,
     confirmAndClean,
-    confirmSchema, // deprecated compat
-    handleSchemaOverride,
+    handleBlueprintOverride,
+    toggleStructuralAction,
+    handleSchemaOverride: async (
+      fileId: string,
+      column: string,
+      semanticRole: EnrichedSchemaField['semantic_role']
+    ) => {
+      void fileId;
+      void column;
+      void semanticRole;
+    },
     reviseAnalysis,
     approveAnalysis,
     validateAndGenerateDashboard,
@@ -494,3 +380,4 @@ export function useFileQueue() {
     },
   };
 }
+

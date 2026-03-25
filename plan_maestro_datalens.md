@@ -3,6 +3,26 @@
 
 ---
 
+## Update — 2026-03-25 | Qué ya quedó implementado y qué sigue pendiente
+
+- Ya quedó implementado en `datalens-app/` el nuevo pipeline de 9 fases con blueprint de normalización, preview dual original/normalizado, validación SQL local y review con AG Grid.
+- Ya existen endpoints nuevos para `generate_blueprint`, `save_blueprint_override`, `execute_blueprint_and_save`, `get_dataset_status` y `export_normalized_file`.
+- Ya existe el contrato local para persistencia híbrida y el adapter stub de Supabase.
+- **Sigue pendiente la conexión real con Supabase**:
+  - tablas de metadata
+  - tablas dinámicas por dataset
+  - Storage de original y export normalizado
+  - SQL/RPC reales
+  - reemplazo total de la persistencia local
+
+Esto cambia la prioridad práctica del roadmap:
+- el refactor del pipeline base ya no está pendiente
+- la prioridad técnica ahora pasa a ser cerrar Supabase de punta a punta
+
+> Si querés, el siguiente paso natural es que te deje armada también la capa SQL/RPC de Supabase con los CREATE TABLE, metadata tables y funciones rpc listas para enchufar.
+
+---
+
 ## 🧭 Qué es DataLens AI (contexto rápido)
 
 Una app **Next.js** que permite subir múltiples archivos CSV, procesarlos con una cadena de agentes de IA (limpieza, schema, análisis, visualizaciones), y explorar los datos mediante chat conversacional con SQL real.

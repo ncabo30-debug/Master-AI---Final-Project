@@ -1,385 +1,287 @@
 import { NextResponse } from 'next/server';
-import { ManagerAgent, VizExpertAgent } from '@/lib/agents';
 import { AgentBus } from '@/lib/agents/core/AgentBus';
+import { ManagerAgent, VizExpertAgent } from '@/lib/agents';
 import {
-    storeData, getData, getOriginalData, getExcelBuffer, getProfile,
-    storeCleaningResult, generateSessionId, storeIssueReport, getIssueReport,
-    updateSession, getAnalysis, getSummaries, getSchema, getSchemaBlueprint
+  generateSessionId,
+  getApprovedBlueprint,
+  getData,
+  getDraftBlueprint,
+  getManifest,
+  getNormalizedExportBase64,
+  getProfile,
+  getSchema,
+  getStatisticalProfile,
+  getValidationReport,
+  getWorkbook,
+  getOriginalFileBase64,
+  storeBlueprintSession,
+  storeNormalizedExecution,
+  updateSession,
+  getAnalysis,
+  getSummaries,
 } from '@/lib/DataStore';
 import { translateError } from '@/lib/ErrorTranslator';
-import { applyBlueprintOverride, blueprintToSchema, schemaToBlueprint } from '@/lib/agents/schemaBlueprint';
-import type { EnrichedSchemaField } from '@/lib/agents/types';
+import { applyBlueprintColumnOverride, applyStructuralOverride, blueprintToSchema } from '@/lib/pipeline/blueprint';
+import { buildBlueprintPreview } from '@/lib/pipeline/service';
+import type { ColumnNormalizationPlan, NormalizationBlueprint, RawWorkbook } from '@/lib/pipeline/types';
 
-/**
- * Allow long-running requests for Gemini API inference.
- * Vercel: hobby=10s, pro=300s. Self-hosted: unlimited.
- */
 export const maxDuration = 300;
 
+function createManager(sessionId: string) {
+  return new ManagerAgent(
+    `manager-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    'tenant-default',
+    new AgentBus(sessionId),
+    sessionId
+  );
+}
+
 export async function POST(req: Request) {
-    let action: string | undefined;
-    try {
-        const body = await req.json();
-        action = body.action;
-        const { schema, answers, question, feedback, sessionId: incomingSessionId } = body;
+  let action: string | undefined;
 
-        // ── Resolve session context ──
-        let sessionId = incomingSessionId || null;
+  try {
+    const body = await req.json();
+    action = body.action;
+    const sessionId = String(body.sessionId || generateSessionId());
+    const manager = createManager(sessionId);
 
-        // For actions that need data, resolve it
-        const actionsNeedingData = ['clean_data', 'detect_issues', 'analyze_schema', 'generate_report', 'generate_dashboard', 'chat', 'full_pipeline'];
-        let resolvedData: Record<string, unknown>[] | null = null;
+    const { LLMService } = await import('@/lib/agents/core/LLMService');
+    LLMService.currentSessionId = sessionId;
 
-        if (actionsNeedingData.includes(action!)) {
-            if (body.data && Array.isArray(body.data)) {
-                resolvedData = body.data as Record<string, unknown>[];
-                sessionId = sessionId || generateSessionId();
-                storeData(sessionId, resolvedData);
-            } else if (sessionId) {
-                resolvedData = getData(sessionId);
-            }
+    if (action === 'generate_blueprint') {
+      const workbook = body.workbook as RawWorkbook | undefined;
+      const originalFileBase64 = String(body.originalFileBase64 || '');
 
-            if (!resolvedData || !Array.isArray(resolvedData)) {
-                return NextResponse.json(
-                    { error: 'No data available. Either send data inline or provide a valid sessionId.' },
-                    { status: 400 }
-                );
-            }
-        }
+      if (!workbook || !originalFileBase64) {
+        return NextResponse.json({ error: 'workbook and originalFileBase64 are required.' }, { status: 400 });
+      }
 
-        // Unique manager ID per request
-        const managerId = `manager-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const resolvedSessionId = sessionId || 'default';
-        const localBus = new AgentBus(resolvedSessionId);
+      const result = await manager.generateBlueprint({
+        sessionId,
+        workbook,
+        originalFileBase64,
+      });
 
-        // Set session context for token tracking
-        const { LLMService } = await import('@/lib/agents/core/LLMService');
-        LLMService.currentSessionId = resolvedSessionId;
+      storeBlueprintSession({
+        sessionId,
+        workbook: result.workbook,
+        manifest: result.manifest,
+        originalData: result.preview.originalPreview,
+        statisticalProfile: result.profile,
+        draftBlueprint: result.draftBlueprint,
+        schema: result.derivedSchema,
+        normalizedPreview: result.preview.normalizedPreview,
+        originalFileBase64,
+      });
 
-        const manager = new ManagerAgent(managerId, 'tenant-default', localBus, resolvedSessionId);
-
-        // ══════════════════════════════════════════════════════
-        //  H-3: ACTION — detect_issues (Phase 0: detection only)
-        // ══════════════════════════════════════════════════════
-
-        if (action === 'detect_issues') {
-            console.log(`[API] [Phase 0] Detectando issues para ${resolvedData!.length} filas.`);
-            const rawText = body.rawText || undefined;
-
-            const result = await manager.detectIssues(resolvedData!, rawText);
-
-            // Store original data (immutable) + issue report
-            storeData(sessionId!, resolvedData!);
-            storeIssueReport(sessionId!, result.issueReport);
-            updateSession(sessionId!, {
-                profile: result.profile,
-                ...(result.fileInspection && { fileInspection: result.fileInspection }),
-                ...(result.duplicateReport && { duplicateReport: result.duplicateReport }),
-                ...(result.outlierReport && { outlierReport: result.outlierReport }),
-            });
-
-            return NextResponse.json({
-                sessionId,
-                issueReport: result.issueReport,
-                profile: result.profile,
-                fileInspection: result.fileInspection || null,
-                message: `Detección completa: ${result.issueReport.totalIssues} issues encontrados.`,
-            });
-        }
-
-        // ══════════════════════════════════════════════════════
-        //  H-3: ACTION — apply_cleaning (Phase 2: normalize after user approval)
-        // ══════════════════════════════════════════════════════
-
-        if (action === 'apply_cleaning') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-
-            const originalData = getOriginalData(sessionId);
-            if (!originalData) {
-                return NextResponse.json({ error: 'No original data found. Run detect_issues first.' }, { status: 404 });
-            }
-
-            const profile = getProfile(sessionId);
-            if (!profile) {
-                return NextResponse.json({ error: 'No profile found. Run detect_issues first.' }, { status: 404 });
-            }
-
-            const approvedIssueIds: string[] | undefined = body.approvedIssueIds;
-            console.log(`[API] [Phase 2] Aplicando normalización con ${approvedIssueIds?.length ?? 'ALL'} issues aprobados.`);
-
-            const normResult = await manager.applyNormalization(originalData, profile, approvedIssueIds);
-
-            // Store cleaned data
-            storeCleaningResult(sessionId, normResult.cleanedData, normResult.excelBuffer, profile);
-
-            // Build summaries from the cleaning pipeline
-            const summaries: Record<string, string> = {
-                'Profiler': `Perfiló ${profile.columns.length} columnas: ${profile.columns.map(c => `${c.name}(${c.inferredType})`).join(', ')}`,
-                'Cleaner': `Limpió ${normResult.cleanedData.length} filas y generó Excel formateado.`,
-                'Validator': 'Validó que los tipos sobrevivieron la serialización a Excel.',
-                'Auditor': `Verificó integridad: ${normResult.cleanedData.length} filas consistentes con el CSV original.`
-            };
-            if (normResult.duplicateReport) {
-                const dr = normResult.duplicateReport;
-                summaries['Duplicados'] = `${dr.exactRemoved} duplicados exactos eliminados, ${dr.partialFlagged.length} parciales flaggeados.`;
-            }
-            updateSession(sessionId, {
-                summaries,
-                ...(normResult.duplicateReport && { duplicateReport: normResult.duplicateReport }),
-            });
-
-            // H-10: Reconciliation
-            const reconciliationReport = manager.reconcile(
-                originalData,
-                normResult.cleanedData,
-                profile,
-                normResult.duplicateReport?.exactRemoved ?? 0
-            );
-
-            return NextResponse.json({
-                sessionId,
-                cleanedData: normResult.cleanedData,
-                cleanedRowCount: normResult.cleanedData.length,
-                duplicateReport: normResult.duplicateReport || null,
-                reconciliationReport,
-                message: `Normalización completa. Reconciliación: ${reconciliationReport.reconciliationRate}%.`,
-            });
-        }
-
-        // ── ACTION: clean_data (DEPRECATED — backward compat) ──
-        if (action === 'clean_data') {
-            console.log(`[API] [DEPRECATED] Iniciando pipeline de limpieza para ${resolvedData!.length} filas.`);
-            const rawText = body.rawText || undefined;
-            const cleaningResult = await manager.processDataCleaning(resolvedData!, rawText);
-
-            const summaries: Record<string, string> = {
-                'Profiler': `Perfiló ${cleaningResult.profile.columns.length} columnas: ${cleaningResult.profile.columns.map(c => `${c.name}(${c.inferredType})`).join(', ')}`,
-                'Cleaner': `Limpió ${cleaningResult.cleanedData.length} filas y generó Excel formateado.`,
-                'Validator': 'Validó que los tipos sobrevivieron la serialización a Excel.',
-                'Auditor': `Verificó integridad: ${cleaningResult.cleanedData.length} filas consistentes con el CSV original.`
-            };
-            if (cleaningResult.duplicateReport) {
-                const dr = cleaningResult.duplicateReport;
-                summaries['Duplicados'] = `${dr.exactRemoved} duplicados exactos eliminados, ${dr.partialFlagged.length} parciales flaggeados.`;
-            }
-            if (cleaningResult.outlierReport && cleaningResult.outlierReport.outliers.length > 0) {
-                const or = cleaningResult.outlierReport;
-                summaries['Outliers'] = or.outliers.map(o => {
-                    const vals = o.extremeValues ? o.extremeValues.slice(0, 5).join(', ') : '?';
-                    const bounds = (o.lowerBound != null && o.upperBound != null)
-                        ? ` (rango normal: ${o.lowerBound} – ${o.upperBound})`
-                        : '';
-                    return `${o.column}: valores inusuales [${vals}]${bounds}`;
-                }).join('; ');
-            }
-            if (cleaningResult.fileInspection) {
-                summaries['FileInspector'] = `Encoding: ${cleaningResult.fileInspection.encoding}, Delimitador: '${cleaningResult.fileInspection.delimiter}', Hash backup: ${cleaningResult.fileInspection.originalHash.substring(0, 16)}`;
-            }
-
-            storeCleaningResult(sessionId!, cleaningResult.cleanedData, cleaningResult.excelBuffer, cleaningResult.profile);
-            updateSession(sessionId!, {
-                summaries,
-                ...(cleaningResult.fileInspection && { fileInspection: cleaningResult.fileInspection }),
-                ...(cleaningResult.originalSnapshot && { originalDataSnapshot: cleaningResult.originalSnapshot }),
-                ...(cleaningResult.duplicateReport && { duplicateReport: cleaningResult.duplicateReport }),
-                ...(cleaningResult.outlierReport && { outlierReport: cleaningResult.outlierReport }),
-            });
-
-            return NextResponse.json({
-                sessionId,
-                profile: cleaningResult.profile,
-                cleanedRowCount: cleaningResult.cleanedData.length,
-                duplicateReport: cleaningResult.duplicateReport || null,
-                outlierReport: cleaningResult.outlierReport || null,
-                fileInspection: cleaningResult.fileInspection || null,
-                message: 'Data cleaned successfully.'
-            });
-        }
-
-        // ── ACTION: download_excel ──
-        if (action === 'download_excel') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-            const buffer = getExcelBuffer(sessionId);
-            if (!buffer) {
-                return NextResponse.json({ error: 'No Excel available for this session. Run clean_data first.' }, { status: 404 });
-            }
-            return new Response(Buffer.from(buffer), {
-                headers: {
-                    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    'Content-Disposition': `attachment; filename="datos_limpios_${sessionId}.xlsx"`,
-                },
-            });
-        }
-
-        // ── ACTION: analyze_schema ──
-        if (action === 'analyze_schema') {
-            console.log(`[API] Iniciando análisis y preguntas para ${resolvedData!.length} filas.`);
-            const analysisResult = await manager.processSchemaAndQuestions(resolvedData!);
-            const schemaBlueprint = schemaToBlueprint(sessionId!, analysisResult.schema);
-            updateSession(sessionId!, {
-                schema: analysisResult.schema,
-                schemaBlueprint,
-                questions: analysisResult.questions
-            });
-            return NextResponse.json({ ...analysisResult, schemaBlueprint, sessionId });
-        }
-
-        // ── ACTION: save_schema_override ──
-        if (action === 'save_schema_override') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-
-            const currentBlueprint = getSchemaBlueprint(sessionId);
-            if (!currentBlueprint) {
-                return NextResponse.json({ error: 'Schema blueprint not found for session.' }, { status: 404 });
-            }
-
-            const column = typeof body.column === 'string' ? body.column : '';
-            const semanticRole = body.semanticRole as EnrichedSchemaField['semantic_role'] | undefined;
-
-            if (!column || !semanticRole) {
-                return NextResponse.json({ error: 'column and semanticRole are required.' }, { status: 400 });
-            }
-
-            const nextBlueprint = applyBlueprintOverride(currentBlueprint, column, semanticRole);
-            const nextSchema = blueprintToSchema(nextBlueprint);
-            updateSession(sessionId, { schema: nextSchema, schemaBlueprint: nextBlueprint });
-            return NextResponse.json({ schema: nextSchema, schemaBlueprint: nextBlueprint, sessionId });
-        }
-
-        // ── ACTION: generate_analysis ── (Phase 2)
-        if (action === 'generate_analysis') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-            const summaries = getSummaries(sessionId) || { 'Sistema': 'Sin resúmenes disponibles.' };
-            console.log(`[API] Generando análisis narrativo (Phase 2).`);
-            const result = await manager.processAnalysis(summaries);
-            updateSession(sessionId, { analysis: result.analysis });
-            return NextResponse.json(result);
-        }
-
-        // ── ACTION: revise_analysis ── (Phase 2 retry)
-        if (action === 'revise_analysis') {
-            if (!sessionId || !feedback) {
-                return NextResponse.json({ error: 'sessionId and feedback required.' }, { status: 400 });
-            }
-            const summaries = getSummaries(sessionId) || { 'Sistema': 'Sin resúmenes disponibles.' };
-            const cleanedData = getData(sessionId);
-            if (!cleanedData) {
-                return NextResponse.json({ error: 'No data found for session.' }, { status: 404 });
-            }
-            console.log(`[API] Revisando análisis con feedback del usuario (Phase 2 retry).`);
-            const result = await manager.processAnalysisWithFeedback(summaries, feedback, cleanedData);
-            updateSession(sessionId, { analysis: result.analysis });
-            return NextResponse.json(result);
-        }
-
-        // ── ACTION: propose_visualizations ── (Phase 3)
-        if (action === 'propose_visualizations') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-            const analysis = getAnalysis(sessionId) || 'Análisis no disponible.';
-            const profile = getProfile(sessionId);
-            if (!profile) {
-                return NextResponse.json({ error: 'No profile found. Run clean_data first.' }, { status: 404 });
-            }
-            console.log(`[API] Proponiendo 3 visualizaciones (Phase 3).`);
-            const result = await manager.proposeVisualizations(analysis, profile);
-            updateSession(sessionId, { vizProposals: result.proposals });
-            return NextResponse.json(result);
-        }
-
-        // ── ACTION: validate_viz ── (M6: feasibility check)
-        if (action === 'validate_viz') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-            const profile = getProfile(sessionId);
-            if (!profile) {
-                return NextResponse.json({ error: 'No profile found. Run clean_data first.' }, { status: 404 });
-            }
-            const viz = body.viz;
-            if (!viz) {
-                return NextResponse.json({ error: 'viz object required.' }, { status: 400 });
-            }
-            console.log(`[API] Validando factibilidad de visualización (M6).`);
-            const result = VizExpertAgent.validateFeasibility(viz, profile);
-            return NextResponse.json(result);
-        }
-
-        // ── ACTION: generate_dashboard ── (Phase 3 final)
-        if (action === 'generate_dashboard') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-            const sessionSchema = schema || getSchema(sessionId);
-            if (!sessionSchema) {
-                return NextResponse.json({ error: 'Schema is required.' }, { status: 400 });
-            }
-            console.log(`[API] Generando dashboard final con auditoría (Phase 3).`);
-            const result = await manager.generateFinalDashboard(resolvedData!, sessionSchema, answers || {});
-            return NextResponse.json(result);
-        }
-
-        // ── ACTION: generate_report ──
-        if (action === 'generate_report') {
-            console.log(`[API] Generando reporte final en base al schema y respuestas.`);
-            if (!schema) {
-                return NextResponse.json({ error: 'Schema is required for generating reports.' }, { status: 400 });
-            }
-            const reportResult = await manager.generateFinalReport(resolvedData!, schema, answers || {});
-            return NextResponse.json(reportResult);
-        }
-
-        // ── ACTION: chat ──
-        if (action === 'chat') {
-            console.log(`[API] Procesando pregunta del usuario en chat libre.`);
-            if (!question) {
-                return NextResponse.json({ error: 'Question is required for chat.' }, { status: 400 });
-            }
-            const sessionSchema = schema || getSchema(sessionId!);
-            if (!sessionSchema) {
-                return NextResponse.json({ error: 'Schema is required for chat.' }, { status: 400 });
-            }
-            const chatResult = await manager.processChat(resolvedData!, sessionSchema, question);
-            return NextResponse.json(chatResult);
-        }
-
-        // ── ACTION: full_pipeline ── (Analysis + Viz in one call)
-        if (action === 'full_pipeline') {
-            if (!sessionId) {
-                return NextResponse.json({ error: 'sessionId required.' }, { status: 400 });
-            }
-            const summaries = getSummaries(sessionId) || { 'Sistema': 'Sin resúmenes disponibles.' };
-            const profile = getProfile(sessionId);
-            if (!profile) {
-                return NextResponse.json({ error: 'No profile found. Run clean_data first.' }, { status: 404 });
-            }
-            console.log(`[API] Ejecutando full_pipeline (análisis + visualizaciones).`);
-            const result = await manager.processFullPipeline(summaries, profile);
-            updateSession(sessionId, { analysis: result.analysis, vizProposals: result.proposals });
-            return NextResponse.json({ ...result, sessionId });
-        }
-
-        return NextResponse.json({ error: 'Invalid action provided.' }, { status: 400 });
-
-    } catch (error: unknown) {
-        console.error('[API] Error in analyze route:', error);
-        const translated = translateError(error instanceof Error ? error : String(error), action);
-        return NextResponse.json(
-            {
-                error: translated.userMessage,
-                suggestion: translated.suggestion,
-                technicalDetail: process.env.NODE_ENV === 'development' && error instanceof Error ? error.message : undefined
-            },
-            { status: 500 }
-        );
+      return NextResponse.json({
+        sessionId,
+        manifest: result.manifest,
+        profile: result.profile,
+        diagnosis: result.diagnosis,
+        draftBlueprint: result.draftBlueprint,
+        preview: result.preview,
+        schema: result.derivedSchema,
+        legacy: {
+          deprecatedActions: ['detect_issues', 'apply_cleaning', 'clean_data', 'analyze_schema', 'download_excel'],
+          retirementTarget: '2026-04-30',
+        },
+      });
     }
+
+    if (action === 'save_blueprint_override') {
+      const draftBlueprint = getDraftBlueprint(sessionId);
+      if (!draftBlueprint) {
+        return NextResponse.json({ error: 'Draft blueprint not found for session.' }, { status: 404 });
+      }
+
+      let nextBlueprint: NormalizationBlueprint = draftBlueprint;
+      if (body.columnId && body.patch) {
+        nextBlueprint = applyBlueprintColumnOverride(
+          draftBlueprint,
+          String(body.columnId),
+          body.patch as Partial<ColumnNormalizationPlan>
+        );
+      }
+
+      if (body.structuralActionId) {
+        nextBlueprint = applyStructuralOverride(
+          nextBlueprint,
+          String(body.structuralActionId),
+          Boolean(body.enabled)
+        );
+      }
+
+      updateSession(sessionId, {
+        draftBlueprint: nextBlueprint,
+        schema: blueprintToSchema(nextBlueprint),
+      });
+
+      const workbook = getWorkbook(sessionId);
+      const preview = workbook ? buildBlueprintPreview(workbook, nextBlueprint) : null;
+      if (preview) {
+        updateSession(sessionId, { normalizedPreview: preview.normalizedPreview });
+      }
+
+      return NextResponse.json({
+        sessionId,
+        draftBlueprint: nextBlueprint,
+        schema: blueprintToSchema(nextBlueprint),
+        preview,
+      });
+    }
+
+    if (action === 'execute_blueprint_and_save') {
+      const manifest = getManifest(sessionId);
+      const workbook = getWorkbook(sessionId);
+      const profile = getStatisticalProfile(sessionId);
+      const originalFileBase64 = getOriginalFileBase64(sessionId);
+      const approvedBlueprint = (body.approvedBlueprint as NormalizationBlueprint | undefined) || getDraftBlueprint(sessionId);
+
+      if (!manifest || !workbook || !profile || !originalFileBase64 || !approvedBlueprint) {
+        return NextResponse.json({ error: 'Missing manifest, workbook, profile or blueprint.' }, { status: 404 });
+      }
+
+      const result = await manager.executeBlueprintAndSave({
+        manifest,
+        workbook,
+        approvedBlueprint,
+        profile,
+        originalFileBase64,
+      });
+
+      storeNormalizedExecution({
+        sessionId,
+        approvedBlueprint,
+        normalizedData: result.normalizedData,
+        normalizedPreview: result.normalizedData.slice(0, 50),
+        normalizedExportBase64: result.normalizedExportBase64,
+        validationReport: result.validationReport,
+        manifest: result.manifest,
+      });
+
+      updateSession(sessionId, {
+        schema: blueprintToSchema(approvedBlueprint),
+        summaries: {
+          Profiler: `Perfiladas ${profile.columnCount} columnas sobre ${profile.rowCount} filas.`,
+          Blueprint: `Blueprint v${approvedBlueprint.version} aplicado con ${approvedBlueprint.columnPlan.filter((column) => column.enabled).length} columnas activas.`,
+          Validator: result.validationReport.valid
+            ? 'La validación SQL local fue exitosa.'
+            : `La validación encontró ${result.validationReport.issues.length} observaciones.`,
+        },
+      });
+
+      return NextResponse.json({
+        sessionId,
+        manifest: result.manifest,
+        normalizedData: result.normalizedData,
+        normalizedPreview: result.normalizedData.slice(0, 50),
+        validationReport: result.validationReport,
+      });
+    }
+
+    if (action === 'get_dataset_status') {
+      return NextResponse.json({
+        sessionId,
+        manifest: getManifest(sessionId),
+        draftBlueprint: getDraftBlueprint(sessionId),
+        approvedBlueprint: getApprovedBlueprint(sessionId),
+        validationReport: getValidationReport(sessionId),
+      });
+    }
+
+    if (action === 'export_normalized_file') {
+      const base64 = getNormalizedExportBase64(sessionId);
+      if (!base64) {
+        return NextResponse.json({ error: 'No normalized export available.' }, { status: 404 });
+      }
+
+      return new Response(Buffer.from(base64, 'base64'), {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="normalized_${sessionId}.xlsx"`,
+        },
+      });
+    }
+
+    if (action === 'generate_analysis') {
+      const summaries = getSummaries(sessionId) || { Sistema: 'Sin resúmenes disponibles.' };
+      const result = await manager.processAnalysis(summaries);
+      updateSession(sessionId, { analysis: result.analysis });
+      return NextResponse.json(result);
+    }
+
+    if (action === 'revise_analysis') {
+      if (!body.feedback) {
+        return NextResponse.json({ error: 'feedback is required.' }, { status: 400 });
+      }
+      const data = getData(sessionId);
+      if (!data) {
+        return NextResponse.json({ error: 'No data found for session.' }, { status: 404 });
+      }
+
+      const summaries = getSummaries(sessionId) || { Sistema: 'Sin resúmenes disponibles.' };
+      const result = await manager.processAnalysisWithFeedback(summaries, String(body.feedback), data);
+      updateSession(sessionId, { analysis: result.analysis });
+      return NextResponse.json(result);
+    }
+
+    if (action === 'propose_visualizations') {
+      const analysis = getAnalysis(sessionId) || 'Análisis no disponible.';
+      const profile = getProfile(sessionId);
+      if (!profile) {
+        return NextResponse.json({ error: 'No profile found for session.' }, { status: 404 });
+      }
+      const result = await manager.proposeVisualizations(analysis, profile);
+      updateSession(sessionId, { vizProposals: result.proposals });
+      return NextResponse.json(result);
+    }
+
+    if (action === 'validate_viz') {
+      const profile = getProfile(sessionId);
+      if (!profile || !body.viz) {
+        return NextResponse.json({ error: 'profile and viz are required.' }, { status: 400 });
+      }
+      const result = VizExpertAgent.validateFeasibility(body.viz, profile);
+      return NextResponse.json(result);
+    }
+
+    if (action === 'generate_dashboard') {
+      const data = getData(sessionId);
+      const schema = getSchema(sessionId);
+      if (!data || !schema) {
+        return NextResponse.json({ error: 'No normalized dataset available.' }, { status: 404 });
+      }
+
+      const result = await manager.generateFinalDashboard(
+        data,
+        schema,
+        (body.answers as Record<string, string> | undefined) || {}
+      );
+      return NextResponse.json(result);
+    }
+
+    if (action === 'chat') {
+      const data = getData(sessionId);
+      const schema = getSchema(sessionId);
+      if (!data || !schema || !body.question) {
+        return NextResponse.json({ error: 'question, schema and normalized data are required.' }, { status: 400 });
+      }
+
+      const result = await manager.processChat(data, schema, String(body.question));
+      return NextResponse.json(result);
+    }
+
+    return NextResponse.json({ error: 'Invalid action provided.' }, { status: 400 });
+  } catch (error: unknown) {
+    const translated = translateError(error instanceof Error ? error : String(error), action);
+    return NextResponse.json(
+      {
+        error: translated.userMessage,
+        suggestion: translated.suggestion,
+        technicalDetail: process.env.NODE_ENV === 'development' && error instanceof Error ? error.message : undefined,
+      },
+      { status: 500 }
+    );
+  }
 }

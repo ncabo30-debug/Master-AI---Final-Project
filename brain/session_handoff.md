@@ -1,5 +1,95 @@
 # Session Handoff — 2026-03-23 (actualizado)
 
+## Update — 2026-03-25 | Pipeline 9 fases + Blueprint + AG Grid implementados
+
+### Estado real al cierre de esta sesión
+- El refactor grande del pipeline ya quedó implementado dentro de `datalens-app/`.
+- El flujo principal ya no depende de `detect_issues -> apply_cleaning -> analyze_schema` como camino feliz.
+- El frontend ya trabaja con `generate_blueprint -> save_blueprint_override -> execute_blueprint_and_save`.
+- El dataset **normalizado** quedó como fuente de verdad para análisis, chat, dashboard y validación.
+- El archivo **original** queda preservado para backup, trazabilidad y review.
+- La validación humana de Fase 7 ahora tiene una pantalla nueva basada en **AG Grid**.
+- El proyecto compila en producción: `npm run build` OK.
+
+### Qué se implementó
+- Nueva capa de pipeline en `src/lib/pipeline/`:
+  - `types.ts`
+  - `ingestion.ts`
+  - `profiling.ts`
+  - `blueprint.ts`
+  - `service.ts`
+  - `sqlValidator.ts`
+  - `repositories.ts`
+  - `export.ts`
+- Nuevo motor determinista en `src/lib/transformations/`:
+  - `catalog.ts`
+  - `structuralExecutor.ts`
+  - `router.ts`
+  - `executor.ts`
+- `SchemaAgent.ts` ahora soporta:
+  - `analyzeStructure(profile, sample)`
+  - `analyzeNormalization({ sessionId, datasetId, profile, cleanedRows, diagnosis })`
+- `ManagerAgent.ts` ahora soporta:
+  - `generateBlueprint(...)`
+  - `executeBlueprintAndSave(...)`
+- `DataStore.ts` fue extendido para guardar:
+  - `workbook`
+  - `manifest`
+  - `draftBlueprint`
+  - `approvedBlueprint`
+  - `normalizedPreview`
+  - `normalizedData`
+  - `validationReport`
+  - `normalizedExportBase64`
+  - `originalFileBase64`
+- `route.ts` fue reescrito para soportar:
+  - `generate_blueprint`
+  - `save_blueprint_override`
+  - `execute_blueprint_and_save`
+  - `get_dataset_status`
+  - `export_normalized_file`
+- `useFileQueue.ts` y `fileQueue.ts` fueron migrados al flujo nuevo.
+- Se agregaron dependencias:
+  - `ag-grid-community`
+  - `ag-grid-react`
+  - `@supabase/supabase-js`
+  - `xlsx`
+  - `zod`
+
+### Estado de Supabase hoy
+- **Supabase todavía NO está conectado funcionalmente.**
+- Ya existe un `SupabaseDatasetRepository`, pero está en modo **stub / placeholder**.
+- Hoy la persistencia real sigue corriendo en almacenamiento local de sesión + disco temporal.
+- La validación SQL final corre localmente con `SQLiteService`.
+- Falta todavía la capa real de Supabase:
+  - crear tablas canónicas de metadata
+  - definir el esquema de tablas dinámicas por dataset
+  - conectar Storage para original + export normalizado
+  - implementar inserts batch
+  - implementar SQL/RPC reales
+  - mover el estado de sesión persistente fuera de `DataStore` local
+
+### Punto importante para no perder
+- El refactor dejó listo el **contrato** para Supabase, pero no la **conexión real**.
+- No asumir que ya existe persistencia en PostgreSQL ni Storage productivo.
+- El próximo tramo técnico fuerte es **cerrar Supabase de punta a punta** y reemplazar la persistencia local.
+
+### Próximo paso recomendado
+**Si querés, el siguiente paso natural es que te deje armada también la capa SQL/RPC de Supabase con los CREATE TABLE, metadata tables y funciones rpc listas para enchufar.**
+
+### Archivos clave tocados en esta sesión
+- `datalens-app/src/app/api/analyze/route.ts`
+- `datalens-app/src/lib/DataStore.ts`
+- `datalens-app/src/lib/useFileQueue.ts`
+- `datalens-app/src/lib/fileQueue.ts`
+- `datalens-app/src/lib/agents/ManagerAgent.ts`
+- `datalens-app/src/lib/agents/SchemaAgent.ts`
+- `datalens-app/src/components/layout/BlueprintReviewFlow.tsx`
+- `datalens-app/src/components/layout/TabbedFileView.tsx`
+- `datalens-app/src/components/layout/ValidationTab.tsx`
+- `datalens-app/src/components/layout/SchemaTab.tsx`
+- `datalens-app/src/app/globals.css`
+
 ## Estado general
 La app funciona localmente. El pipeline multi-archivo está implementado y compila sin errores.
 **La Fase H (rediseño del pipeline) está completa.** Siguiente objetivo: migrar a arquitectura de producción (Vercel + Railway + Supabase).

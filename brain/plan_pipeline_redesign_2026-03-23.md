@@ -3,6 +3,21 @@
 
 ---
 
+## Update — 2026-03-25 | Estado de implementación
+
+- Este documento quedó parcialmente superado por la implementación real del pipeline nuevo en `datalens-app/`.
+- El flujo actual ya evolucionó desde la separación `detect_issues/apply_cleaning` hacia el pipeline de blueprint:
+  - `generate_blueprint`
+  - `save_blueprint_override`
+  - `execute_blueprint_and_save`
+- El concepto de `cleanedData` quedó absorbido por `normalizedData` como fuente de verdad.
+- La validación humana ya no está pensada solo como panel de issues: ahora existe una review completa con AG Grid y edición del blueprint.
+- **Lo pendiente fuerte sigue siendo Supabase**: el pipeline local está armado, pero las conexiones reales a PostgreSQL/Storage/RPC todavía no.
+
+> Si querés, el siguiente paso natural es que te deje armada también la capa SQL/RPC de Supabase con los CREATE TABLE, metadata tables y funciones rpc listas para enchufar.
+
+---
+
 ## El problema que resuelve este plan
 
 El pipeline actual limpia los datos **antes** de que el usuario vea nada. Para cuando aparece la pantalla de validación, el archivo original ya fue modificado en el servidor y lo que el usuario ve son datos ya transformados, no el original con los problemas marcados.

@@ -12,8 +12,8 @@ export default function FileDropTarget({ onAddFiles }: FileDropTargetProps) {
 
   const handleFiles = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
-    const csvFiles = Array.from(fileList).filter((f) => f.name.endsWith('.csv'));
-    if (csvFiles.length > 0) onAddFiles(csvFiles);
+    const supportedFiles = Array.from(fileList).filter((f) => /\.(csv|xlsx|xls)$/i.test(f.name));
+    if (supportedFiles.length > 0) onAddFiles(supportedFiles);
   };
 
   return (
@@ -41,7 +41,7 @@ export default function FileDropTarget({ onAddFiles }: FileDropTargetProps) {
         ref={inputRef}
         type="file"
         multiple
-        accept=".csv"
+        accept=".csv,.xlsx,.xls"
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />

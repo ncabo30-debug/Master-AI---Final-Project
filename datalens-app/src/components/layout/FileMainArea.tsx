@@ -2,7 +2,7 @@ import type { FileRecord } from '@/lib/fileQueue';
 import type { UseFileQueueReturn } from '@/lib/useFileQueue';
 import EmptyState from './EmptyState';
 import ProcessingSpinner from './ProcessingSpinner';
-import SchemaValidationFlow from './SchemaValidationFlow';
+import BlueprintReviewFlow from './BlueprintReviewFlow';
 import TabbedFileView from './TabbedFileView';
 
 interface FileMainAreaProps {
@@ -35,18 +35,16 @@ export default function FileMainArea({ file, queue }: FileMainAreaProps) {
 
   // Processing states (yellow)
   if (
-    file.status === 'DETECTING' ||
-    file.status === 'CLEANING' ||
-    file.status === 'SCHEMA_DETECTION' ||
-    file.status === 'NORMALIZING' ||
-    file.status === 'VALIDATING'
+    file.status === 'PROFILING' ||
+    file.status === 'EXECUTING_BLUEPRINT' ||
+    file.status === 'PERSISTING' ||
+    file.status === 'SQL_VALIDATING'
   ) {
     return <ProcessingSpinner file={file} />;
   }
 
-  // Awaiting user schema validation
-  if (file.status === 'AWAITING_VALIDATION') {
-    return <SchemaValidationFlow file={file} queue={queue} />;
+  if (file.status === 'BLUEPRINT_READY' || file.status === 'AWAITING_APPROVAL') {
+    return <BlueprintReviewFlow file={file} queue={queue} />;
   }
 
   // Error state
@@ -85,8 +83,7 @@ export default function FileMainArea({ file, queue }: FileMainAreaProps) {
     );
   }
 
-  // Ready: show 5-tab view
-  if (file.status === 'READY') {
+  if (file.status === 'READY' || file.status === 'VALIDATION_FAILED') {
     return <TabbedFileView file={file} queue={queue} />;
   }
 
