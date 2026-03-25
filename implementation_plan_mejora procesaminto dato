@@ -1,0 +1,60 @@
+# Plan de Implementación: Arquitectura de 9 Fases
+
+Este plan detalla los pasos técnicos para refactorizar la pipeline de datos actual hacia el modelo determinista de 9 fases basado en un "Catálogo", preservando la funcionalidad de IA como respaldo.
+
+## Principio Fundamental: Inmutabilidad del Archivo Original
+> [!IMPORTANT]
+> **1. Archivo Original Intacto a Storage:** El Blueprint y diagnóstico que se le le muestra al usuario presenta SIEMPRE la data del archivo original importado, resaltando errores y sugerencias. Este archivo original crudo subirá siempre de forma intacta e inmutable a **Supabase Storage**.
+> **2. Validación Previa:** Antes de mostrarle esta información al usuario, se realizará una validación para asegurar que la data original no fue mutada en memoria.
+> **3. Copia y Ejecución hacia PostgreSQL:** ÚNICAMENTE cuando el usuario aprueba, se iteran las transformaciones puras en memoria. El dataset limpio se enviará a una **tabla dinámica creada en PostgreSQL (Supabase)**, apalancando el tipado fuerte para garantizar la limpieza final. La descarga en `.xlsx` es solo un *export* opcional, no el destino final.
+
+## User Review Required
+> [!IMPORTANT]
+> **Cambios en la API:** El flujo actual de `detect_issues` cambiará a `generate_blueprint`. El resultado que verá el frontend será la suma de la data original + los errores resaltados + el blueprint.
+
+## Proposed Changes
+
+### 1. Creación del Catálogo y Executor Determinista
+Implementaremos el corazón de la nueva arquitectura: transformaciones puras.
+#### [NEW] `src/lib/transformations/catalog.ts`
+  - Se migrarán las utilidades de limpieza (`dateUtils.ts`, limpieza de strings/números de [CleanerAgent](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/CleanerAgent.ts#22-301)) a funciones puras (ej. `parseDate`, `normalizeNumber`, `trimSpaces`, `normalizeCategory`, etc.).
+#### [NEW] `src/lib/transformations/executor.ts`
+  - Tendrá una función `executeBlueprint(data, blueprint)` que iterará sobre las filas y aplicará las funciones del `catalog.ts` correspondientes a cada columna. 
+  - Tendrá una función `executeStructuralPlan(data, plan)` para limpieza estructural (ej. eliminar filas superiores de metadatos).
+
+---
+
+### 2. Refactor del SchemaAgent (Fases 3 y 5)
+El Schema Agent asumirá las decisiones de limpieza, separadas en estructura, columnas y **tipos de bases de datos**.
+#### [MODIFY] [src/lib/agents/SchemaAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/SchemaAgent.ts)
+  - **Fase 3 (Estructura):** Nuevo método `analyzeStructure(profile, sample)` que recibe las primeras filas y decide si hay metadatos, subtotales o encabezados desfasados, devolviendo un `plan_limpieza` estructural JSON.
+  - **Fase 5 (Columnas):** Nuevo método `analyzeColumns(data_limpia, profile)` que decide el `formato_objetivo`, la `transformacion` correspondiente al catálogo, y críticamente el **`tipo_postgres`** (ej. `DATE`, `DECIMAL(10,2)`) para cada columna. Devuelve el "Blueprint" matriz para la ejecución.
+
+---
+
+### 3. Preservación y Adaptación del CleanerAgent (Fallback de IA)
+#### [MODIFY] [src/lib/agents/CleanerAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/CleanerAgent.ts) (o `cleanWithAI.ts`)
+  - Se eliminarán las reglas de limpieza *hardcodeadas*, ya que ahora vivirán en el `catalog.ts`.
+  - Se mantendrá el método [cleanWithAI](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/CleanerAgent.ts#228-300) (reempaquetado como ayuda o fallback). Si durante la `Fase 8` (Ejecución del Blueprint) el `Validator` detecta que el catálogo determinista falló (por un caso súper atípico no mapeado), se invocará [cleanWithAI](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/CleanerAgent.ts#228-300) como salvavidas adaptativo.
+
+---
+
+### 4. Orquestación en ManagerAgent y API Route
+Se conectarán las fases de manera secuencial y segmentada para permitir la intervención humana (Fase 7).
+#### [MODIFY] [src/lib/agents/ManagerAgent.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/ManagerAgent.ts)
+  - Se crearán dos flujos principales:
+    1. `generateBlueprint(rawData)`: Ejecuta el análisis (Perfilado y Schema). Luego **verifica la inmutabilidad** del archivo original. Construye la respuesta para el front: la **data original intacta** decorada con los errores detectados y el Blueprint de propuestas de limpieza.
+    2. `executeFinalBlueprint(data, blueprint)`: Recibe la aprobación del usuario. Aplica el Executor (Fase 8) a una copia de los datos usando el Router (Fase 6). Luego, **crea dinámicamente una tabla en Supabase PostgreSQL** basada en los `tipo_postgres` del Blueprint y **hace el INSERT** de los datos limpios. La validación (Fase 9) ocurre primero por rechazo nativo de PostgreSQL, seguido del IntegrityAuditor.
+#### [MODIFY] [src/app/api/analyze/route.ts](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/app/api/analyze/route.ts)
+  - Mapear la acción de inicio (`action: 'generate_blueprint'`), y la acción final de ejecución (`action: 'execute_blueprint_and_save'`).
+
+## Verification Plan
+
+### Automated Tests
+- Correr el endpoint con un archivo CSV local (usando el actual mecanismo en [test-api.js](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/test-api.js) o similar) para validar:
+  1. Que `action: generate_blueprint` retorne correctamente el JSON con la transformación de catálogo asignada.
+  2. Que `action: execute_blueprint` consuma dicho blueprint y genere el buffer de Excel limpio.
+
+### Manual Verification
+- Validar mediante console.logs o debugger que en ningún momento se efectúa una limpieza con LLM en el "feliz path" (comprobando que la Fase 8 llama puramente a `executor.ts`), y que el LLM del [SchemaAgent](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/SchemaAgent.ts#8-107) sí genera el JSON estructurado requerido.
+- Forzar un error de formato complejo para validar que [cleanWithAI](file:///c:/Users/Keyrus/OneDrive%20-%20Keyrus/Escritorio/Projecto%20Final%20Master%20IA/datalens-app/src/lib/agents/CleanerAgent.ts#228-300) se active exitosamente como red de seguridad.

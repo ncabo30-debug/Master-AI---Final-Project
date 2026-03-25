@@ -5,7 +5,13 @@
       "Bash(find 'C:/Users/Keyrus/OneDrive - Keyrus/Escritorio/Projecto Final Master IA/datalens-app' -maxdepth 2 -name tailwind.config.* -o -name globals.css)",
       "Bash(find 'C:/Users/Keyrus/OneDrive - Keyrus/Escritorio/Projecto Final Master IA/datalens-app' -name *.css -type f)",
       "Bash(npx tsc:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(claude mcp:*)",
+      "mcp__figma__whoami",
+      "mcp__figma__generate_diagram"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Keyrus\\OneDrive - Keyrus\\Escritorio\\Projecto Final Master IA\\.claude"
     ]
   }
 }
