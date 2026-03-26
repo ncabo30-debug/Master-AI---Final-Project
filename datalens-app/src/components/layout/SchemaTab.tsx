@@ -17,7 +17,7 @@ export default function SchemaTab({ blueprint }: SchemaTabProps) {
     <div className="animate-fade-in space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-bold text-slate-100">Blueprint de Normalización</h3>
+          <h3 className="font-bold text-slate-100">Normalization Blueprint</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             Versión {blueprint.version} · {blueprint.columnPlan.length} columnas · {blueprint.structuralPlan.length} acciones estructurales
           </p>

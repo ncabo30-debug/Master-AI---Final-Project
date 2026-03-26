@@ -1,6 +1,3 @@
-'use client';
-
-import { useState } from 'react';
 import type { ReconciliationReport } from '@/lib/agents/types';
 
 interface NormalizationTabProps {
@@ -45,9 +42,6 @@ function diffCells(
 }
 
 export default function NormalizationTab({ rawData, cleanedData, reconciliationReport }: NormalizationTabProps) {
-  const [showDiffs, setShowDiffs] = useState(false);
-  const [showColumnSummary, setShowColumnSummary] = useState(false);
-
   if (!rawData || !cleanedData) {
     return (
       <div className="flex items-center justify-center h-40 text-slate-500 text-sm">
@@ -203,116 +197,93 @@ export default function NormalizationTab({ rawData, cleanedData, reconciliationR
         </div>
       </div>
 
-      {/* ═══ Cell-by-cell diff (accordion) ═══ */}
+      {/* ═══ Cell-by-cell diff ═══ */}
       {cellDiffs.length > 0 && (
-        <div className="rounded-xl border border-border-dark overflow-hidden">
-          <button
-            onClick={() => setShowDiffs((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 bg-slate-800/50 hover:bg-slate-800/80 transition-colors text-left"
-          >
-            <div>
-              <span className="font-semibold text-slate-100 text-sm">Cambios Realizados</span>
-              <span className="text-xs text-slate-500 ml-2">
-                {cellDiffs.length} celda{cellDiffs.length !== 1 ? 's' : ''} modificada{cellDiffs.length !== 1 ? 's' : ''}
-              </span>
-            </div>
-            <span className="material-symbols-outlined text-slate-400 text-sm">
-              {showDiffs ? 'expand_less' : 'expand_more'}
-            </span>
-          </button>
-          {showDiffs && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border-dark bg-slate-800/30">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Fila</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Columna</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Original</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Normalizado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border-dark">
-                  {cellDiffs.map((diff, idx) => (
-                    <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="px-4 py-2.5 text-slate-500 font-mono text-xs">{diff.rowIndex + 1}</td>
-                      <td className="px-4 py-2.5 text-slate-200 font-mono font-medium text-xs">{diff.column}</td>
-                      <td className="px-4 py-2.5">
-                        <span className="inline-block px-2 py-0.5 rounded bg-red-500/10 text-red-300 text-xs font-mono border border-red-500/20 max-w-[250px] truncate">
-                          {diff.original || <em className="text-slate-600">vacío</em>}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 text-xs font-mono border border-emerald-500/20 max-w-[250px] truncate">
-                          {diff.cleaned || <em className="text-slate-600">vacío</em>}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Column summary table (accordion) */}
-      <div className="rounded-xl border border-border-dark overflow-hidden">
-        <button
-          onClick={() => setShowColumnSummary((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 bg-slate-800/50 hover:bg-slate-800/80 transition-colors text-left"
-        >
-          <div>
-            <span className="font-semibold text-slate-100 text-sm">Resumen por Columna</span>
-            <span className="text-xs text-slate-500 ml-2">
-              {columnStats.filter((s) => s.corrected > 0).length} columna{columnStats.filter((s) => s.corrected > 0).length !== 1 ? 's' : ''} con cambios
-            </span>
+        <div>
+          <div className="mb-3">
+            <h3 className="font-bold text-slate-100">Cambios Realizados</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Detalle de las {cellDiffs.length} celdas modificadas durante la normalización
+            </p>
           </div>
-          <span className="material-symbols-outlined text-slate-400 text-sm">
-            {showColumnSummary ? 'expand_less' : 'expand_more'}
-          </span>
-        </button>
-        {showColumnSummary && (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-xl border border-border-dark">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border-dark bg-slate-800/30">
+                <tr className="border-b border-border-dark bg-slate-800/50">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Fila</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Columna</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Estado</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Corregidas</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Limpias</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Original</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Normalizado</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-dark">
-                {columnStats.map(({ column, corrected, clean }) => (
-                  <tr key={column} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-slate-200 font-medium">{column}</td>
-                    <td className="px-4 py-3">
-                      {corrected > 0 ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          <span className="material-symbols-outlined text-xs">auto_fix_high</span>
-                          Corregido
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
-                          <span className="material-symbols-outlined text-xs">check_circle</span>
-                          Limpio
-                        </span>
-                      )}
+                {cellDiffs.map((diff, idx) => (
+                  <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="px-4 py-2.5 text-slate-500 font-mono text-xs">{diff.rowIndex + 1}</td>
+                    <td className="px-4 py-2.5 text-slate-200 font-mono font-medium text-xs">{diff.column}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-block px-2 py-0.5 rounded bg-red-500/10 text-red-300 text-xs font-mono border border-red-500/20 max-w-[250px] truncate">
+                        {diff.original || <em className="text-slate-600">vacío</em>}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      {corrected > 0 ? (
-                        <span className="text-amber-400 font-medium">{corrected}</span>
-                      ) : (
-                        <span className="text-slate-600">0</span>
-                      )}
+                    <td className="px-4 py-2.5">
+                      <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 text-xs font-mono border border-emerald-500/20 max-w-[250px] truncate">
+                        {diff.cleaned || <em className="text-slate-600">vacío</em>}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-green-400 font-medium">{clean}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* Column summary table */}
+      <div>
+        <div className="mb-3">
+          <h3 className="font-bold text-slate-100">Resumen por Columna</h3>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-border-dark">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border-dark bg-slate-800/50">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Columna</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Estado</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Corregidas</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">Limpias</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-dark">
+              {columnStats.map(({ column, corrected, clean }) => (
+                <tr key={column} className="hover:bg-slate-800/30 transition-colors">
+                  <td className="px-4 py-3 font-mono text-slate-200 font-medium">{column}</td>
+                  <td className="px-4 py-3">
+                    {corrected > 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        <span className="material-symbols-outlined text-xs">auto_fix_high</span>
+                        Corregido
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
+                        <span className="material-symbols-outlined text-xs">check_circle</span>
+                        Limpio
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {corrected > 0 ? (
+                      <span className="text-amber-400 font-medium">{corrected}</span>
+                    ) : (
+                      <span className="text-slate-600">0</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right text-green-400 font-medium">{clean}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
