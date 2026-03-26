@@ -31,6 +31,13 @@ function transformOptions(column: ColumnNormalizationPlan['transform'][]) {
   ));
 }
 
+function formatActionParams(params: Record<string, unknown>): string {
+  if (!params || Object.keys(params).length === 0) return '';
+  return Object.entries(params)
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+    .join(' · ');
+}
+
 export default function BlueprintReviewFlow({ file, queue }: BlueprintReviewFlowProps) {
   const blueprint = file.draftBlueprint ?? file.approvedBlueprint;
   const originalRows = file.rawData ?? [];
@@ -125,7 +132,9 @@ export default function BlueprintReviewFlow({ file, queue }: BlueprintReviewFlow
                   />
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-slate-100">{action.action}</p>
-                    <p className="text-xs text-slate-500 mt-1">{JSON.stringify(action.params)}</p>
+                    {action.params && Object.keys(action.params).length > 0 && (
+                      <p className="text-xs text-slate-500 mt-1">{formatActionParams(action.params as Record<string, unknown>)}</p>
+                    )}
                   </div>
                 </label>
               ))}

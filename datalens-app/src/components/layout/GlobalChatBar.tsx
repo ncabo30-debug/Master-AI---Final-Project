@@ -9,6 +9,7 @@ interface GlobalChatBarProps {
   isTyping: boolean;
   onSend: (text: string) => void;
   canChat: boolean;
+  selectedFileName?: string | null;
 }
 
 export default function GlobalChatBar({
@@ -17,6 +18,7 @@ export default function GlobalChatBar({
   isTyping,
   onSend,
   canChat,
+  selectedFileName,
 }: GlobalChatBarProps) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -44,6 +46,8 @@ export default function GlobalChatBar({
   const hint =
     readyFilesCount === 0
       ? 'Sube un archivo para comenzar'
+      : selectedFileName
+      ? `Preguntando sobre "${selectedFileName}"`
       : `Chat global · ${readyFilesCount} archivo${readyFilesCount > 1 ? 's' : ''} disponible${readyFilesCount > 1 ? 's' : ''}`;
 
   return (
@@ -107,9 +111,9 @@ export default function GlobalChatBar({
             disabled={!canChat || isTyping}
             className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-500 outline-none disabled:cursor-not-allowed"
           />
-          {readyFilesCount > 0 && (
-            <span className="text-xs text-slate-600 shrink-0">
-              {readyFilesCount} archivo{readyFilesCount > 1 ? 's' : ''}
+          {selectedFileName && readyFilesCount > 0 && (
+            <span className="shrink-0 max-w-[120px] truncate text-[10px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+              {selectedFileName}
             </span>
           )}
         </div>
